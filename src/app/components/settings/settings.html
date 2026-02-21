@@ -1,0 +1,151 @@
+<main class="flex-1 flex flex-col bg-white dark:bg-background-dark h-full">
+  <!-- Header -->
+  <header class="h-14 flex items-center px-8 border-b border-slate-200 dark:border-slate-800 flex-shrink-0">
+    <span class="material-symbols-outlined text-lg text-slate-500 dark:text-slate-400 mr-3">settings</span>
+    <h2 class="text-lg font-semibold">Configuración</h2>
+  </header>
+
+  <!-- Content -->
+  <div class="flex-1 overflow-y-auto p-8 lg:px-16 xl:px-24 custom-scrollbar">
+    <div class="max-w-2xl mx-auto space-y-12">
+
+      <!-- Theme Section (Dark / Light / System) -->
+      <section>
+        <h3 class="text-sm font-bold uppercase tracking-widest text-slate-400 mb-6">Modo de apariencia</h3>
+
+        <div class="space-y-3">
+          @for (option of themeOptions; track option.value) {
+            <button
+              (click)="selectTheme(option.value)"
+              [class]="themeService.currentTheme() === option.value
+                ? 'w-full flex items-center gap-4 p-4 rounded-xl border-2 border-primary bg-primary/5 dark:bg-primary/10 transition-all'
+                : 'w-full flex items-center gap-4 p-4 rounded-xl border-2 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-all'"
+            >
+              <div
+                [class]="themeService.currentTheme() === option.value
+                  ? 'w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center'
+                  : 'w-12 h-12 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center'"
+              >
+                <span
+                  [class]="themeService.currentTheme() === option.value
+                    ? 'material-symbols-outlined text-2xl text-primary'
+                    : 'material-symbols-outlined text-2xl text-slate-500 dark:text-slate-400'"
+                >{{ option.icon }}</span>
+              </div>
+              <div class="flex-1 text-left">
+                <p
+                  [class]="themeService.currentTheme() === option.value
+                    ? 'text-sm font-semibold text-primary'
+                    : 'text-sm font-semibold text-slate-700 dark:text-slate-200'"
+                >{{ option.label }}</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{{ option.description }}</p>
+              </div>
+              @if (themeService.currentTheme() === option.value) {
+                <span class="material-symbols-outlined text-primary text-xl">check_circle</span>
+              }
+            </button>
+          }
+        </div>
+      </section>
+
+      <!-- Color Accent Section -->
+      <section>
+        <h3 class="text-sm font-bold uppercase tracking-widest text-slate-400 mb-6">Color de acento</h3>
+
+        <div class="grid grid-cols-3 gap-3">
+          @for (option of colorThemeOptions; track option.value) {
+            <button
+              (click)="selectColorTheme(option.value)"
+              [class]="themeService.currentColorTheme() === option.value
+                ? 'relative flex flex-col items-center gap-3 p-5 rounded-xl border-2 border-primary bg-primary/5 dark:bg-primary/10 transition-all'
+                : 'relative flex flex-col items-center gap-3 p-5 rounded-xl border-2 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-all'"
+            >
+              @if (option.value === 'custom') {
+                <div
+                  class="w-10 h-10 rounded-full border-2 border-dashed border-slate-400 dark:border-slate-500 flex items-center justify-center"
+                >
+                  <span class="material-symbols-outlined text-lg text-slate-400">{{ option.icon }}</span>
+                </div>
+              } @else {
+                <div
+                  class="w-10 h-10 rounded-full shadow-md"
+                  [style.background]="option.color"
+                ></div>
+              }
+
+              <div class="text-center">
+                <p
+                  [class]="themeService.currentColorTheme() === option.value
+                    ? 'text-xs font-semibold text-primary'
+                    : 'text-xs font-semibold text-slate-700 dark:text-slate-200'"
+                >{{ option.label }}</p>
+                <p class="text-[10px] text-slate-400 mt-0.5 leading-tight">{{ option.description }}</p>
+              </div>
+
+              @if (themeService.currentColorTheme() === option.value) {
+                <span class="absolute top-2 right-2 material-symbols-outlined text-primary text-base">check_circle</span>
+              }
+            </button>
+          }
+        </div>
+
+        <!-- Custom color picker -->
+        @if (themeService.currentColorTheme() === 'custom') {
+          <div class="mt-4 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+            <label class="flex items-center gap-4">
+              <div
+                class="w-10 h-10 rounded-lg shadow-inner cursor-pointer relative overflow-hidden border border-slate-300 dark:border-slate-600"
+                [style.background]="themeService.customColor()"
+              >
+                <input
+                  type="color"
+                  class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  [value]="themeService.customColor()"
+                  (input)="onCustomColorChange($any($event.target).value)"
+                />
+              </div>
+              <div>
+                <p class="text-sm font-medium text-slate-700 dark:text-slate-200">Tu color personalizado</p>
+                <p class="text-xs text-slate-400 font-mono mt-0.5">{{ themeService.customColor() }}</p>
+              </div>
+            </label>
+          </div>
+        }
+      </section>
+
+      <!-- Preview -->
+      <section>
+        <h3 class="text-sm font-bold uppercase tracking-widest text-slate-400 mb-4">Vista previa</h3>
+        <div class="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div class="flex">
+            <!-- Mini sidebar -->
+            <div class="w-16 bg-slate-100 dark:bg-slate-900 p-3 flex flex-col gap-2 border-r border-slate-200 dark:border-slate-700">
+              <div class="w-full h-2 rounded bg-slate-300 dark:bg-slate-700"></div>
+              <div class="w-full h-2 rounded bg-primary/40"></div>
+              <div class="w-full h-2 rounded bg-slate-300 dark:bg-slate-700"></div>
+            </div>
+            <!-- Mini list -->
+            <div class="w-24 bg-white dark:bg-[#151c2c] p-3 flex flex-col gap-2 border-r border-slate-200 dark:border-slate-700">
+              <div class="w-full h-2 rounded bg-primary/30"></div>
+              <div class="w-full h-1.5 rounded bg-slate-200 dark:bg-slate-700"></div>
+              <div class="w-3/4 h-1.5 rounded bg-slate-200 dark:bg-slate-700"></div>
+              <div class="w-full h-px bg-slate-200 dark:bg-slate-700 my-1"></div>
+              <div class="w-full h-2 rounded bg-slate-200 dark:bg-slate-700"></div>
+              <div class="w-2/3 h-1.5 rounded bg-slate-200 dark:bg-slate-700"></div>
+            </div>
+            <!-- Mini editor -->
+            <div class="flex-1 bg-white dark:bg-background-dark p-4 flex flex-col gap-2">
+              <div class="w-1/2 h-3 rounded bg-slate-300 dark:bg-slate-600"></div>
+              <div class="w-full h-1.5 rounded bg-slate-200 dark:bg-slate-700 mt-2"></div>
+              <div class="w-full h-1.5 rounded bg-slate-200 dark:bg-slate-700"></div>
+              <div class="w-3/4 h-1.5 rounded bg-slate-200 dark:bg-slate-700"></div>
+              <div class="w-full h-1.5 rounded bg-slate-200 dark:bg-slate-700 mt-2"></div>
+              <div class="w-5/6 h-1.5 rounded bg-slate-200 dark:bg-slate-700"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</main>

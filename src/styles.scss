@@ -1,1 +1,63 @@
-/* You can add global styles to this file, and also import other style files */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+/* ── Color Theme Variables ── */
+:root,
+:root[data-color-theme='blue'] {
+  --color-primary: 19 91 236;
+  --color-bg-dark: 16 22 34;
+  --color-sidebar-dark: 12 20 37;
+}
+
+:root[data-color-theme='green'] {
+  --color-primary: 16 185 129;
+  --color-bg-dark: 13 25 20;
+  --color-sidebar-dark: 10 30 22;
+}
+
+:root[data-color-theme='rose'] {
+  --color-primary: 244 63 94;
+  --color-bg-dark: 30 14 20;
+  --color-sidebar-dark: 35 12 22;
+}
+
+:root[data-color-theme='amber'] {
+  --color-primary: 245 158 11;
+  --color-bg-dark: 28 24 13;
+  --color-sidebar-dark: 32 26 10;
+}
+
+:root[data-color-theme='violet'] {
+  --color-primary: 139 92 246;
+  --color-bg-dark: 20 14 34;
+  --color-sidebar-dark: 22 12 40;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

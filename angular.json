@@ -6,7 +6,7 @@
   },
   "newProjectRoot": "projects",
   "projects": {
-    "app-desktop-pioleins-note": {
+    "app-desktop-helper-note": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -35,6 +35,7 @@
           },
           "configurations": {
             "production": {
+              "baseHref": "./",
               "budgets": [
                 {
                   "type": "initial",
@@ -61,10 +62,10 @@
           "builder": "@angular/build:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "app-desktop-pioleins-note:build:production"
+              "buildTarget": "app-desktop-helper-note:build:production"
             },
             "development": {
-              "buildTarget": "app-desktop-pioleins-note:build:development"
+              "buildTarget": "app-desktop-helper-note:build:development"
             }
           },
           "defaultConfiguration": "development"
