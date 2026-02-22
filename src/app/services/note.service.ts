@@ -1,10 +1,11 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, NgZone, inject } from '@angular/core';
 import { Folder } from '../models/folder.model';
 import { Note } from '../models/note.model';
 
 @Injectable({ providedIn: 'root' })
 export class NoteService {
   private api = window.electronAPI;
+  private zone = inject(NgZone);
 
   // ── State ──
   readonly folders = signal<Folder[]>([]);
@@ -21,6 +22,21 @@ export class NoteService {
     const id = this.selectedFolderId();
     return this.folders().find((f) => f.id === id) ?? null;
   });
+
+  constructor() {
+    // Listen for note changes from other windows
+    this.api.onNoteChanged((noteId: number) => {
+      this.zone.run(async () => {
+        await this.loadNotes();
+        // If the changed note is the one currently selected, re-select to refresh editor
+        if (this.selectedNoteId() === noteId) {
+          // Force re-emit by toggling
+          this.selectedNoteId.set(null);
+          this.selectedNoteId.set(noteId);
+        }
+      });
+    });
+  }
 
   // ── Folders ──
   async loadFolders(): Promise<void> {
@@ -83,5 +99,36 @@ export class NoteService {
       this.selectedNoteId.set(null);
     }
     await this.loadNotes();
+  }
+
+  async moveNoteToFolder(noteId: number, folderId: number | null): Promise<void> {
+    await this.api.notesUpdate(noteId, { folder_id: folderId });
+    // Reload notes so the moved note disappears from the current view
+    await this.loadNotes();
+    // Deselect if the moved note was selected (it's now in a different folder)
+    if (this.selectedNoteId() === noteId) {
+      this.selectedNoteId.set(null);
+    }
+  }
+
+  async importNotes(): Promise<number> {
+    const files = await this.api.fileImport();
+    if (!files || files.length === 0) return 0;
+
+    let lastNoteId: number | null = null;
+    for (const file of files) {
+      const note = await this.api.notesCreate(this.selectedFolderId(), file.title);
+      const updateData: { content: string; file_data?: string; file_type?: string } = { content: file.content };
+      if (file.file_data) updateData.file_data = file.file_data;
+      if (file.file_type) updateData.file_type = file.file_type;
+      await this.api.notesUpdate(note.id, updateData);
+      lastNoteId = note.id;
+    }
+
+    await this.loadNotes();
+    if (lastNoteId !== null) {
+      this.selectedNoteId.set(lastNoteId);
+    }
+    return files.length;
   }
 }

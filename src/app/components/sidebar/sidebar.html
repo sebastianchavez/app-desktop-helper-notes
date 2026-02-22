@@ -1,27 +1,40 @@
-<aside class="flex-shrink-0 flex flex-col bg-slate-100 dark:bg-background-dark h-full w-full">
-  <div class="p-6 flex flex-col h-full">
-    <!-- Logo -->
-    <div class="flex items-center gap-3 mb-8">
-      <div class="bg-primary p-2 rounded-lg">
+<aside class="flex-shrink-0 flex flex-col bg-slate-100 dark:bg-background-dark h-full w-full transition-all duration-300">
+  <div class="flex flex-col h-full" [class]="collapsed() ? 'p-3' : 'p-6'">
+    <!-- Logo / collapse toggle -->
+    <div
+      class="flex items-center gap-3 mb-8 cursor-pointer select-none group"
+      [class.justify-center]="collapsed()"
+      (click)="collapseToggle.emit()"
+    >
+      <div class="bg-primary p-2 rounded-lg flex-shrink-0">
         <span class="material-symbols-outlined text-white text-xl">sticky_note_2</span>
       </div>
-      <h1 class="text-xl font-bold tracking-tight">Helper Note</h1>
+      @if (!collapsed()) {
+        <h1 class="text-xl font-bold tracking-tight flex-1">Helper Notes</h1>
+        <span class="material-symbols-outlined text-sm text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">chevron_left</span>
+      }
     </div>
 
     <!-- Folders -->
+    @if (!collapsed()) {
     <div class="flex flex-col gap-6 flex-1 overflow-y-auto custom-scrollbar">
       <div class="flex flex-col gap-1">
-        <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2 px-3">Folders</p>
+        <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2 px-3">{{ 'SIDEBAR.FOLDERS' | translate }}</p>
         <nav class="flex flex-col gap-1">
           <!-- All notes -->
           <a
             (click)="selectFolder(null)"
-            [class]="noteService.selectedFolderId() === null
-              ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer'
-              : 'flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer'"
+            (dragover)="onDragOver($event, null)"
+            (dragleave)="onDragLeave()"
+            (drop)="onDrop($event, null)"
+            [class]="(dragOverFolderId() === 'all'
+              ? 'flex items-center gap-3 px-3 py-2 rounded-lg ring-2 ring-primary bg-primary/20 text-primary cursor-pointer'
+              : noteService.selectedFolderId() === null
+                ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer'
+                : 'flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer')"
           >
             <span class="material-symbols-outlined text-lg">notes</span>
-            <span class="text-sm font-medium">Todas las notas</span>
+            <span class="text-sm font-medium">{{ 'SIDEBAR.ALL_NOTES' | translate }}</span>
           </a>
 
           <!-- Dynamic folders -->
@@ -47,12 +60,21 @@
               <a
                 (click)="selectFolder(folder.id)"
                 (dblclick)="startEditing(folder.id, folder.name)"
-                [class]="noteService.selectedFolderId() === folder.id
-                  ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer group'
-                  : 'flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer group'"
+                (dragover)="onDragOver($event, folder.id)"
+                (dragleave)="onDragLeave()"
+                (drop)="onDrop($event, folder.id)"
+                [class]="(dragOverFolderId() === folder.id
+                  ? 'flex items-center gap-3 px-3 py-2 rounded-lg ring-2 ring-primary bg-primary/20 text-primary cursor-pointer group'
+                  : noteService.selectedFolderId() === folder.id
+                    ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer group'
+                    : 'flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer group')"
               >
                 <span class="material-symbols-outlined text-lg">folder</span>
                 <span class="text-sm font-medium flex-1 truncate">{{ folder.name }}</span>
+                <button
+                  (click)="startEditingFromButton(folder.id, folder.name, $event)"
+                  class="material-symbols-outlined text-sm opacity-0 group-hover:opacity-100 text-slate-400 hover:text-primary transition-all"
+                >edit</button>
                 <button
                   (click)="deleteFolder(folder.id, $event)"
                   class="material-symbols-outlined text-sm opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-400 transition-all"
@@ -63,45 +85,102 @@
         </nav>
       </div>
     </div>
+    } @else {
+    <!-- Collapsed: icon-only folder shortcuts -->
+    <div class="flex flex-col gap-2 flex-1 overflow-y-auto items-center">
+      <button
+        (click)="selectFolder(null)"
+        (dragover)="onDragOver($event, null)"
+        (dragleave)="onDragLeave()"
+        (drop)="onDrop($event, null)"
+        [class]="(dragOverFolderId() === 'all'
+          ? 'p-2 rounded-lg ring-2 ring-primary bg-primary/20 text-primary'
+          : noteService.selectedFolderId() === null
+            ? 'p-2 rounded-lg bg-primary/10 text-primary'
+            : 'p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors')"
+        [title]="'SIDEBAR.ALL_NOTES' | translate"
+      >
+        <span class="material-symbols-outlined text-lg">notes</span>
+      </button>
+      @for (folder of noteService.folders(); track folder.id) {
+        <button
+          (click)="selectFolder(folder.id)"
+          (dragover)="onDragOver($event, folder.id)"
+          (dragleave)="onDragLeave()"
+          (drop)="onDrop($event, folder.id)"
+          [class]="(dragOverFolderId() === folder.id
+            ? 'p-2 rounded-lg ring-2 ring-primary bg-primary/20 text-primary'
+            : noteService.selectedFolderId() === folder.id
+              ? 'p-2 rounded-lg bg-primary/10 text-primary'
+              : 'p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors')"
+          [title]="folder.name"
+        >
+          <span class="material-symbols-outlined text-lg">folder</span>
+        </button>
+      }
+    </div>
+    }
 
     <!-- Bottom -->
     <div class="mt-auto pt-6 border-t border-slate-200 dark:border-slate-800">
-      @if (showNewFolderInput()) {
-        <div class="flex items-center gap-2 mb-4">
-          <input
-            class="flex-1 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary"
-            placeholder="Nombre de la carpeta..."
-            [value]="newFolderName()"
-            (input)="newFolderName.set($any($event.target).value)"
-            (keydown.enter)="confirmNewFolder()"
-            (keydown.escape)="cancelNewFolder()"
-            autofocus
-          />
-          <button (click)="confirmNewFolder()" class="text-green-500 hover:text-green-400">
-            <span class="material-symbols-outlined text-lg">check</span>
+      @if (!collapsed()) {
+        @if (showNewFolderInput()) {
+          <div class="flex items-center gap-2 mb-4">
+            <input
+              class="flex-1 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary"
+              [placeholder]="'SIDEBAR.FOLDER_NAME_PLACEHOLDER' | translate"
+              [value]="newFolderName()"
+              (input)="newFolderName.set($any($event.target).value)"
+              (keydown.enter)="confirmNewFolder()"
+              (keydown.escape)="cancelNewFolder()"
+              autofocus
+            />
+            <button (click)="confirmNewFolder()" class="text-green-500 hover:text-green-400">
+              <span class="material-symbols-outlined text-lg">check</span>
+            </button>
+            <button (click)="cancelNewFolder()" class="text-slate-400 hover:text-slate-300">
+              <span class="material-symbols-outlined text-lg">close</span>
+            </button>
+          </div>
+        } @else {
+          <button
+            (click)="showNewFolder()"
+            class="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white rounded-lg py-2.5 transition-all shadow-lg shadow-primary/20 mb-4"
+          >
+            <span class="material-symbols-outlined text-xl">add</span>
+            <span class="text-sm font-bold">{{ 'SIDEBAR.NEW_FOLDER' | translate }}</span>
           </button>
-          <button (click)="cancelNewFolder()" class="text-slate-400 hover:text-slate-300">
-            <span class="material-symbols-outlined text-lg">close</span>
-          </button>
+        }
+        <div
+          (click)="goToSettings()"
+          [class]="navService.currentView() === 'settings'
+            ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer'
+            : 'flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer transition-colors'"
+        >
+          <span class="material-symbols-outlined text-lg">settings</span>
+          <span class="text-sm font-medium">{{ 'SIDEBAR.SETTINGS' | translate }}</span>
         </div>
       } @else {
-        <button
-          (click)="showNewFolder()"
-          class="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white rounded-lg py-2.5 transition-all shadow-lg shadow-primary/20 mb-4"
-        >
-          <span class="material-symbols-outlined text-xl">add</span>
-          <span class="text-sm font-bold">Nueva Carpeta</span>
-        </button>
+        <!-- Collapsed bottom: icon-only buttons -->
+        <div class="flex flex-col items-center gap-2">
+          <button
+            (click)="showNewFolder(); collapseToggle.emit()"
+            class="p-2 rounded-lg bg-primary text-white hover:bg-primary/90 transition-all"
+            [title]="'SIDEBAR.NEW_FOLDER' | translate"
+          >
+            <span class="material-symbols-outlined text-lg">add</span>
+          </button>
+          <button
+            (click)="goToSettings()"
+            [class]="navService.currentView() === 'settings'
+              ? 'p-2 rounded-lg bg-primary/10 text-primary'
+              : 'p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors'"
+            [title]="'SIDEBAR.SETTINGS' | translate"
+          >
+            <span class="material-symbols-outlined text-lg">settings</span>
+          </button>
+        </div>
       }
-      <div
-        (click)="navService.goToSettings()"
-        [class]="navService.currentView() === 'settings'
-          ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer'
-          : 'flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer transition-colors'"
-      >
-        <span class="material-symbols-outlined text-lg">settings</span>
-        <span class="text-sm font-medium">Configuración</span>
-      </div>
     </div>
   </div>
 </aside>

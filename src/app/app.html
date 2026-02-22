@@ -1,20 +1,53 @@
+@if (standaloneNoteId()) {
+  <!-- Standalone note window -->
+  <div class="flex h-screen w-full bg-white dark:bg-background-dark text-slate-900 dark:text-slate-100">
+    <app-note-editor class="flex-1 min-w-0" (aiChatToggle)="toggleAiChat()" />
+    @if (aiChatOpen()) {
+      <app-resize-handle (resizing)="onAiChatResize($event)" />
+      <div class="flex-shrink-0 h-full" [style.width.px]="aiChatWidth()">
+        <app-ai-chat />
+      </div>
+    }
+  </div>
+} @else {
 <div class="flex h-screen w-full bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100">
   <!-- Sidebar -->
-  <div class="flex-shrink-0 h-full" [style.width.px]="sidebarWidth()">
-    <app-sidebar />
+  <div
+    class="flex-shrink-0 h-full transition-[width] duration-300 ease-in-out"
+    [style.width.px]="sidebarCollapsed() ? 64 : sidebarWidth()"
+  >
+    <app-sidebar [collapsed]="sidebarCollapsed()" (collapseToggle)="toggleSidebar()" />
   </div>
-  <app-resize-handle (resizing)="onSidebarResize($event)" />
+  @if (!sidebarCollapsed()) {
+    <app-resize-handle (resizing)="onSidebarResize($event)" />
+  }
 
   @if (navService.currentView() === 'settings') {
     <app-settings />
   } @else {
     <!-- Note List -->
-    <div class="flex-shrink-0 h-full" [style.width.px]="noteListWidth()">
-      <app-note-list />
+    <div
+      class="flex-shrink-0 h-full transition-[width] duration-300 ease-in-out"
+      [style.width.px]="noteListCollapsed() ? 48 : noteListWidth()"
+    >
+      <app-note-list [collapsed]="noteListCollapsed()" (collapseToggle)="toggleNoteList()" />
     </div>
-    <app-resize-handle (resizing)="onNoteListResize($event)" />
+    @if (!noteListCollapsed()) {
+      <app-resize-handle (resizing)="onNoteListResize($event)" />
+    }
 
     <!-- Editor -->
-    <app-note-editor />
+    <app-note-editor class="flex-1 min-w-0" (aiChatToggle)="toggleAiChat()" />
+
+    <!-- AI Chat panel -->
+    @if (aiChatOpen()) {
+      <app-resize-handle (resizing)="onAiChatResize($event)" />
+      <div class="flex-shrink-0 h-full" [style.width.px]="aiChatWidth()">
+        <app-ai-chat />
+      </div>
+    }
   }
 </div>
+}
+
+<app-download-toast />

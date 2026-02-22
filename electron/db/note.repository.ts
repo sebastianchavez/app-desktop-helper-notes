@@ -5,17 +5,20 @@ export interface NoteRow {
   folder_id: number | null;
   title: string;
   content: string;
+  file_data: string | null;
+  file_type: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export function getNotesByFolder(folderId: number | null): NoteRow[] {
   const db = getDb();
+  const cols = 'id, folder_id, title, content, file_type, created_at, updated_at';
   if (folderId === null) {
-    return db.prepare('SELECT * FROM notes ORDER BY updated_at DESC').all() as NoteRow[];
+    return db.prepare(`SELECT ${cols} FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC`).all() as NoteRow[];
   }
   return db
-    .prepare('SELECT * FROM notes WHERE folder_id = ? ORDER BY updated_at DESC')
+    .prepare(`SELECT ${cols} FROM notes WHERE folder_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC`)
     .all(folderId) as NoteRow[];
 }
 
@@ -48,6 +51,14 @@ export function updateNote(id: number, data: { title?: string; content?: string;
     fields.push('folder_id = ?');
     values.push(data.folder_id);
   }
+  if ((data as any).file_data !== undefined) {
+    fields.push('file_data = ?');
+    values.push((data as any).file_data);
+  }
+  if ((data as any).file_type !== undefined) {
+    fields.push('file_type = ?');
+    values.push((data as any).file_type);
+  }
 
   if (fields.length > 0) {
     fields.push("updated_at = datetime('now')");
@@ -60,5 +71,5 @@ export function updateNote(id: number, data: { title?: string; content?: string;
 
 export function deleteNote(id: number): void {
   const db = getDb();
-  db.prepare('DELETE FROM notes WHERE id = ?').run(id);
+  db.prepare("UPDATE notes SET deleted_at = datetime('now') WHERE id = ?").run(id);
 }

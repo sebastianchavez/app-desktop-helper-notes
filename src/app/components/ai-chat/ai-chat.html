@@ -1,0 +1,444 @@
+<div class="flex flex-col h-full bg-white dark:bg-background-dark">
+  <!-- Header -->
+  <div class="flex items-center gap-2 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex-shrink-0">
+    <span class="material-symbols-outlined text-lg text-primary">smart_toy</span>
+    <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-1">{{ 'AI_CHAT.TITLE' | translate }}</h2>
+
+    <!-- Ollama status indicator -->
+    @if (chatService.ollamaRunning() === true) {
+      <button
+        class="chat-header-btn !w-auto px-2 gap-1 group"
+        [title]="'AI_CHAT.OLLAMA_RUNNING_STOP' | translate"
+        (click)="onStopOllama()"
+        [disabled]="chatService.ollamaStopping()"
+      >
+        @if (chatService.ollamaStopping()) {
+          <span class="material-symbols-outlined text-sm animate-spin text-amber-500">progress_activity</span>
+        } @else {
+          <span class="w-2 h-2 rounded-full bg-emerald-500 group-hover:hidden"></span>
+          <span class="material-symbols-outlined text-sm text-red-500 hidden group-hover:inline">stop_circle</span>
+        }
+      </button>
+    } @else if (chatService.ollamaInstalled() === true) {
+      <button
+        class="chat-header-btn !w-auto px-2 gap-1"
+        [title]="'AI_CHAT.OLLAMA_STOPPED_START' | translate"
+        (click)="onStartOllama()"
+        [disabled]="chatService.ollamaStarting()"
+      >
+        @if (chatService.ollamaStarting()) {
+          <span class="material-symbols-outlined text-sm animate-spin text-amber-500">progress_activity</span>
+        } @else {
+          <span class="material-symbols-outlined text-sm text-emerald-500">play_circle</span>
+        }
+      </button>
+    }
+
+    <!-- New conversation -->
+    <button
+      class="chat-header-btn"
+      [title]="'AI_CHAT.NEW_CONVERSATION' | translate"
+      (click)="onNewConversation()"
+      [disabled]="!chatService.ollamaAvailable()"
+    >
+      <span class="material-symbols-outlined text-base">add_comment</span>
+    </button>
+
+    <!-- Show sessions panel -->
+    <button
+      class="chat-header-btn"
+      [class.active-header-btn]="chatService.showSessions()"
+      [title]="'AI_CHAT.CONVERSATION_HISTORY' | translate"
+      (click)="toggleSessions()"
+      [disabled]="!chatService.ollamaAvailable()"
+    >
+      <span class="material-symbols-outlined text-base">history</span>
+    </button>
+
+    <!-- Refresh status -->
+    <button
+      class="chat-header-btn"
+      [title]="'AI_CHAT.REFRESH_STATUS' | translate"
+      (click)="onRefreshModels()"
+    >
+      <span class="material-symbols-outlined text-base">refresh</span>
+    </button>
+  </div>
+
+  <!-- Main content area -->
+  <div class="flex-1 overflow-hidden relative">
+    <!-- Sessions panel (slides in from left) -->
+    @if (chatService.showSessions()) {
+      <div class="sessions-panel absolute inset-0 z-10 flex flex-col bg-white dark:bg-background-dark">
+        <!-- Sessions header -->
+        <div class="flex items-center gap-2 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 flex-shrink-0">
+          <span class="material-symbols-outlined text-base text-slate-400">forum</span>
+          <span class="text-xs font-medium text-slate-600 dark:text-slate-400 flex-1">{{ 'AI_CHAT.CONVERSATIONS' | translate }}</span>
+          <button
+            class="chat-header-btn"
+            [title]="'AI_CHAT.CLOSE_HISTORY' | translate"
+            (click)="toggleSessions()"
+          >
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+
+        <!-- Sessions list -->
+        <div class="flex-1 overflow-y-auto custom-scrollbar">
+          @if (chatService.conversations().length === 0) {
+            <div class="flex flex-col items-center justify-center h-full p-6 text-center">
+              <span class="material-symbols-outlined text-4xl mb-2 text-slate-300 dark:text-slate-600">chat_bubble_outline</span>
+              <p class="text-xs text-slate-400 dark:text-slate-500">{{ 'AI_CHAT.NO_CONVERSATIONS' | translate }}</p>
+            </div>
+          } @else {
+            <div class="py-1">
+              @for (conv of chatService.conversations(); track conv.id) {
+                <div
+                  class="session-item group flex items-center gap-2 px-4 py-2.5 cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                  [class.session-item-active]="conv.id === chatService.activeConversationId()"
+                  (click)="onSelectConversation(conv.id)"
+                >
+                  <span class="material-symbols-outlined text-base flex-shrink-0"
+                    [class]="conv.id === chatService.activeConversationId()
+                      ? 'text-primary'
+                      : 'text-slate-400 dark:text-slate-500'"
+                  >chat_bubble</span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-medium truncate"
+                      [class]="conv.id === chatService.activeConversationId()
+                        ? 'text-primary'
+                        : 'text-slate-700 dark:text-slate-300'"
+                    >{{ conv.title }}</p>
+                    <div class="flex items-center gap-1.5 mt-0.5">
+                      <span class="text-[10px] text-slate-400 dark:text-slate-500">{{ conv.model.split(':')[0] }}</span>
+                      <span class="text-[10px] text-slate-300 dark:text-slate-600">·</span>
+                      <span class="text-[10px] text-slate-400 dark:text-slate-500">{{ formatDate(conv.updated_at) }}</span>
+                    </div>
+                  </div>
+                  <button
+                    class="session-delete-btn flex-shrink-0 w-6 h-6 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    [class]="confirmDeleteId() === conv.id
+                      ? 'bg-red-500 text-white opacity-100'
+                      : 'hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500'"
+                    [title]="confirmDeleteId() === conv.id ? ('AI_CHAT.CONFIRM_DELETE' | translate) : ('AI_CHAT.DELETE_CONVERSATION' | translate)"
+                    (click)="onDeleteConversation(conv.id, $event)"
+                  >
+                    <span class="material-symbols-outlined text-sm">
+                      {{ confirmDeleteId() === conv.id ? 'check' : 'delete' }}
+                    </span>
+                  </button>
+                </div>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- New conversation button at bottom of sessions panel -->
+        <div class="flex-shrink-0 p-3 border-t border-slate-200 dark:border-slate-800">
+          <button
+            class="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium rounded-lg bg-primary hover:bg-primary/90 text-white transition-colors"
+            (click)="onNewConversation(); toggleSessions()"
+          >
+            <span class="material-symbols-outlined text-sm">add</span>
+            {{ 'AI_CHAT.NEW_CONVERSATION' | translate }}
+          </button>
+        </div>
+      </div>
+    }
+
+    <!-- Messages Area -->
+    <div class="h-full overflow-y-auto custom-scrollbar" #messagesContainer>
+      @if (chatService.ollamaInstalled() === null) {
+        <!-- Loading / checking status -->
+        <div class="flex items-center justify-center h-full p-6">
+          <div class="text-center">
+            <span class="material-symbols-outlined text-4xl mb-3 block text-slate-300 dark:text-slate-600 animate-spin">progress_activity</span>
+            <p class="text-xs text-slate-400">{{ 'AI_CHAT.CHECKING_OLLAMA' | translate }}</p>
+          </div>
+        </div>
+      } @else if (chatService.ollamaInstalled() === false) {
+        <!-- Ollama NOT installed -->
+        <div class="flex items-center justify-center h-full p-6">
+          <div class="text-center max-w-xs">
+            <span class="material-symbols-outlined text-5xl mb-3 block text-slate-300 dark:text-slate-600">cloud_off</span>
+            <p class="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">{{ 'AI_CHAT.OLLAMA_NOT_INSTALLED' | translate }}</p>
+            <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">
+              {{ 'AI_CHAT.INSTALL_OLLAMA_DESC' | translate }}
+            </p>
+            <button
+              (click)="onOpenDownload()"
+              class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary hover:bg-primary/90 text-white transition-colors"
+            >
+              <span class="material-symbols-outlined text-sm">open_in_new</span>
+              {{ 'AI_CHAT.DOWNLOAD_OLLAMA' | translate }}
+            </button>
+            <p class="text-[10px] text-slate-400 mt-3">
+              {{ 'AI_CHAT.AFTER_INSTALL' | translate }}
+              <span class="material-symbols-outlined text-[10px] align-middle">refresh</span>
+              para detectarlo.
+            </p>
+          </div>
+        </div>
+      } @else if (chatService.ollamaInstalled() === true && chatService.ollamaRunning() === false) {
+        <!-- Ollama installed but NOT running -->
+        <div class="flex items-center justify-center h-full p-6">
+          <div class="text-center max-w-xs">
+            <span class="material-symbols-outlined text-5xl mb-3 block text-slate-300 dark:text-slate-600">power_settings_new</span>
+            <p class="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">{{ 'AI_CHAT.OLLAMA_NOT_RUNNING' | translate }}</p>
+            <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">
+              {{ 'AI_CHAT.START_OLLAMA_DESC' | translate }}
+            </p>
+            <button
+              (click)="onStartOllama()"
+              [disabled]="chatService.ollamaStarting()"
+              class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+            >
+              @if (chatService.ollamaStarting()) {
+                <span class="material-symbols-outlined text-sm animate-spin">progress_activity</span>
+                {{ 'AI_CHAT.STARTING' | translate }}
+              } @else {
+                <span class="material-symbols-outlined text-sm">play_arrow</span>
+                {{ 'AI_CHAT.START_OLLAMA' | translate }}
+              }
+            </button>
+          </div>
+        </div>
+      } @else if (chatService.ollamaAvailable() && !chatService.hasModels()) {
+        <!-- No models -->
+        <div class="flex items-center justify-center h-full p-6">
+          <div class="text-center max-w-xs">
+            <span class="material-symbols-outlined text-5xl mb-3 block text-slate-300 dark:text-slate-600">download</span>
+            <p class="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">{{ 'AI_CHAT.NO_MODELS' | translate }}</p>
+            <p class="text-xs text-slate-400 dark:text-slate-500">
+              Descarga un modelo con: <code class="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-[10px]">ollama pull llama3.2</code>
+            </p>
+          </div>
+        </div>
+      } @else if (chatService.messages().length === 0) {
+        <!-- Empty state -->
+        <div class="flex items-center justify-center h-full p-6">
+          <div class="text-center max-w-xs">
+            <span class="material-symbols-outlined text-5xl mb-3 block text-slate-300 dark:text-slate-600">chat</span>
+            <p class="text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">{{ 'AI_CHAT.START_CONVERSATION' | translate }}</p>
+            <p class="text-xs text-slate-400 dark:text-slate-500">
+              {{ 'AI_CHAT.ASK_ANYTHING' | translate }}
+            </p>
+            @if (noteService.selectedNote()) {
+              <div class="mt-3 flex items-center gap-1.5 justify-center text-[11px] text-primary/70">
+                <span class="material-symbols-outlined text-sm">description</span>
+                <span>{{ 'AI_CHAT.ACTIVE_NOTE' | translate }}: "{{ noteService.selectedNote()!.title || ('AI_CHAT.NO_TITLE' | translate) }}"</span>
+              </div>
+            }
+          </div>
+        </div>
+      } @else {
+        <!-- Message list -->
+        <div class="p-4 space-y-4">
+          @for (msg of chatService.messages(); track $index) {
+            <div class="flex gap-3" [class]="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+              @if (msg.role === 'assistant') {
+                <div class="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center mt-0.5">
+                  <span class="material-symbols-outlined text-sm text-primary">smart_toy</span>
+                </div>
+              }
+              <div
+                class="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
+                [class]="msg.role === 'user'
+                  ? 'bg-primary text-white rounded-br-md'
+                  : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 rounded-bl-md'"
+              >
+                <!-- Thinking indicator -->
+                @if (msg.isStreaming && !msg.content && chatService.isThinking()) {
+                  <div class="flex items-center gap-2 text-slate-400 dark:text-slate-500">
+                    <div class="thinking-dots flex gap-1">
+                      <span class="dot"></span>
+                      <span class="dot"></span>
+                      <span class="dot"></span>
+                    </div>
+                    <span class="text-xs">{{ 'AI_CHAT.THINKING' | translate }}</span>
+                  </div>
+                } @else {
+                  <!-- Message text content -->
+                  <div class="message-content whitespace-pre-wrap break-words">{{ getMessageDisplay(msg) }}<span
+                    class="streaming-cursor"
+                    [class.active]="msg.isStreaming"
+                  ></span></div>
+                }
+
+                <!-- Action cards -->
+                @if (hasActions(msg) && !msg.isStreaming) {
+                  <div class="mt-3 space-y-2">
+                    @for (action of msg.actions; track action.id) {
+                      <div class="action-card rounded-lg border overflow-hidden"
+                        [class]="action.status === 'applied'
+                          ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20'
+                          : action.status === 'rejected'
+                            ? 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 opacity-60'
+                            : 'border-primary/30 dark:border-primary/40 bg-white dark:bg-slate-900/60'"
+                      >
+                        <!-- Action header -->
+                        <div class="flex items-center gap-2 px-3 py-2 border-b"
+                          [class]="action.status === 'applied'
+                            ? 'border-emerald-200 dark:border-emerald-800'
+                            : action.status === 'rejected'
+                              ? 'border-slate-200 dark:border-slate-700'
+                              : 'border-primary/20 dark:border-primary/30'"
+                        >
+                          <span class="material-symbols-outlined text-base"
+                            [class]="action.status === 'applied'
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : action.status === 'rejected'
+                                ? 'text-slate-400'
+                                : 'text-primary'"
+                          >{{ getActionIcon(action) }}</span>
+                          <span class="text-xs font-medium flex-1"
+                            [class]="action.status === 'applied'
+                              ? 'text-emerald-700 dark:text-emerald-300'
+                              : action.status === 'rejected'
+                                ? 'text-slate-500'
+                                : 'text-slate-700 dark:text-slate-300'"
+                          >{{ getActionLabel(action) }}</span>
+
+                          <!-- Status badge or buttons -->
+                          @if (action.status === 'applied') {
+                            <span class="flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                              <span class="material-symbols-outlined text-xs">check_circle</span>
+                              {{ 'AI_CHAT.APPLIED' | translate }}
+                            </span>
+                          } @else if (action.status === 'rejected') {
+                            <span class="flex items-center gap-1 text-[10px] font-medium text-slate-400">
+                              <span class="material-symbols-outlined text-xs">cancel</span>
+                              {{ 'AI_CHAT.REJECTED' | translate }}
+                            </span>
+                          } @else {
+                            <div class="flex items-center gap-1">
+                              <button
+                                class="action-btn action-btn-reject"
+                                [title]="'AI_CHAT.REJECT' | translate"
+                                (click)="onRejectAction(msg, action)"
+                              >
+                                <span class="material-symbols-outlined text-xs">close</span>
+                              </button>
+                              <button
+                                class="action-btn action-btn-apply"
+                                [title]="'AI_CHAT.APPLY_CHANGE' | translate"
+                                (click)="onApplyAction(msg, action)"
+                              >
+                                <span class="material-symbols-outlined text-xs">check</span>
+                                {{ 'AI_CHAT.APPLY' | translate }}
+                              </button>
+                            </div>
+                          }
+                        </div>
+
+                        <!-- Action description/preview -->
+                        <div class="px-3 py-2">
+                          <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                            {{ getActionDescription(action) }}
+                          </p>
+                          @if (action.content) {
+                            @if (hasChangePreview(action)) {
+                              <div class="flex items-center gap-1 mt-1.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                                <span class="material-symbols-outlined text-xs">add_circle</span>
+                                {{ 'AI_CHAT.CHANGES_LABEL' | translate }}
+                              </div>
+                            }
+                            <div class="action-preview mt-1 text-[11px] text-slate-600 dark:text-slate-400 max-h-[100px] overflow-hidden rounded bg-slate-50 dark:bg-slate-800/60 px-2 py-1.5 border border-slate-100 dark:border-slate-700/50 whitespace-pre-wrap">
+                              {{ getContentPreview(action).substring(0, 300) }}{{ getContentPreview(action).length > 300 ? '...' : '' }}
+                            </div>
+                          }
+                        </div>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+              @if (msg.role === 'user') {
+                <div class="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center mt-0.5">
+                  <span class="material-symbols-outlined text-sm text-primary">person</span>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- Input Area -->
+  <div class="flex-shrink-0 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
+    <!-- Model selector -->
+    <div class="flex items-center gap-2 px-4 py-1.5 border-b border-slate-100 dark:border-slate-800/50">
+      <span class="text-[10px] text-slate-400 uppercase tracking-wider">{{ 'AI_CHAT.MODEL' | translate }}:</span>
+      <div class="relative">
+        <button
+          class="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+          (click)="showModelSelector.set(!showModelSelector())"
+          [disabled]="!chatService.hasModels()"
+        >
+          {{ chatService.selectedModel() ? formatModelName(chatService.selectedModel()) : ('AI_CHAT.SELECT_MODEL' | translate) }}
+          <span class="material-symbols-outlined text-xs">expand_more</span>
+        </button>
+        @if (showModelSelector()) {
+          <div class="absolute bottom-full left-0 mb-1 z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg py-1 min-w-[200px] max-h-[200px] overflow-y-auto custom-scrollbar">
+            @for (model of chatService.models(); track model.name) {
+              <button
+                class="w-full text-left px-3 py-2 text-xs hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-between gap-2 transition-colors"
+                [class]="model.name === chatService.selectedModel()
+                  ? 'text-primary font-medium'
+                  : 'text-slate-600 dark:text-slate-400'"
+                (click)="selectModel(model.name)"
+              >
+                <span class="truncate">{{ formatModelName(model.name) }}</span>
+                <span class="text-[10px] text-slate-400 flex-shrink-0">{{ formatModelSize(model.size) }}</span>
+              </button>
+            }
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Note context indicator -->
+    @if (noteService.selectedNote()) {
+      <div class="flex items-center gap-1.5 px-4 py-1 border-b border-slate-100 dark:border-slate-800/50 bg-primary/5 dark:bg-primary/10">
+        <span class="material-symbols-outlined text-xs text-primary/60">description</span>
+        <span class="text-[10px] text-primary/70 dark:text-primary/60 truncate flex-1">
+          {{ 'AI_CHAT.CONTEXT' | translate }}: {{ noteService.selectedNote()!.title || ('AI_CHAT.NO_TITLE' | translate) }}
+        </span>
+        <span class="material-symbols-outlined text-xs text-primary/40" [title]="'AI_CHAT.AI_CAN_EDIT' | translate">link</span>
+      </div>
+    }
+
+    <!-- Text input -->
+    <div class="flex items-end gap-2 p-3">
+      <textarea
+        #chatInput
+        class="flex-1 resize-none rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300 placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all custom-scrollbar"
+        rows="1"
+        [placeholder]="'AI_CHAT.TYPE_MESSAGE' | translate"
+        [value]="inputText()"
+        (input)="onInput($event)"
+        (keydown)="onKeydown($event)"
+        [disabled]="!chatService.hasModels()"
+      ></textarea>
+      @if (chatService.isStreaming()) {
+        <button
+          class="flex-shrink-0 w-9 h-9 rounded-xl bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors"
+          [title]="'AI_CHAT.STOP' | translate"
+          (click)="chatService.abort()"
+        >
+          <span class="material-symbols-outlined text-base">stop</span>
+        </button>
+      } @else {
+        <button
+          class="flex-shrink-0 w-9 h-9 rounded-xl bg-primary hover:bg-primary/90 text-white flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          [title]="'AI_CHAT.SEND' | translate"
+          (click)="onSend()"
+          [disabled]="!inputText().trim() || !chatService.hasModels()"
+        >
+          <span class="material-symbols-outlined text-base">send</span>
+        </button>
+      }
+    </div>
+  </div>
+</div>

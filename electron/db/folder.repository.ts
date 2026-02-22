@@ -9,7 +9,7 @@ export interface FolderRow {
 
 export function getAllFolders(): FolderRow[] {
   const db = getDb();
-  return db.prepare('SELECT * FROM folders ORDER BY name ASC').all() as FolderRow[];
+  return db.prepare('SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY name ASC').all() as FolderRow[];
 }
 
 export function createFolder(name: string): FolderRow {
@@ -27,5 +27,7 @@ export function updateFolder(id: number, name: string): FolderRow {
 
 export function deleteFolder(id: number): void {
   const db = getDb();
-  db.prepare('DELETE FROM folders WHERE id = ?').run(id);
+  db.prepare("UPDATE folders SET deleted_at = datetime('now') WHERE id = ?").run(id);
+  // Soft-delete notes in this folder too
+  db.prepare("UPDATE notes SET deleted_at = datetime('now') WHERE folder_id = ? AND deleted_at IS NULL").run(id);
 }

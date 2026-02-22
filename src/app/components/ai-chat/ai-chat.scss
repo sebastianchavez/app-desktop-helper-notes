@@ -1,0 +1,218 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.chat-header-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: theme('colors.slate.400');
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: theme('colors.slate.200');
+    color: theme('colors.slate.600');
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  &.active-header-btn {
+    background: theme('colors.primary' / 0.12);
+    color: theme('colors.primary');
+  }
+}
+
+:host-context(.dark) {
+  .chat-header-btn {
+    color: theme('colors.slate.500');
+
+    &:hover {
+      background: theme('colors.slate.700');
+      color: theme('colors.slate.300');
+    }
+
+    &.active-header-btn {
+      background: theme('colors.primary' / 0.2);
+      color: theme('colors.primary');
+    }
+  }
+}
+
+// Sessions panel
+.sessions-panel {
+  animation: slideIn 0.15s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.session-item {
+  border-left: 2px solid transparent;
+
+  &.session-item-active {
+    background: theme('colors.primary' / 0.06);
+    border-left-color: theme('colors.primary');
+  }
+}
+
+:host-context(.dark) .session-item {
+  &.session-item-active {
+    background: theme('colors.primary' / 0.1);
+  }
+}
+
+// Streaming cursor animation
+.streaming-cursor {
+  display: none;
+
+  &.active {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    background: currentColor;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    animation: blink 0.8s step-end infinite;
+  }
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+// Message content formatting
+.message-content {
+  word-break: break-word;
+
+  code {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.85em;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.06);
+  }
+}
+
+:host-context(.dark) .message-content code {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+// Action card buttons
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.4;
+}
+
+.action-btn-apply {
+  background: theme('colors.primary');
+  color: white;
+  border-color: theme('colors.primary');
+
+  &:hover {
+    filter: brightness(1.1);
+  }
+}
+
+.action-btn-reject {
+  background: transparent;
+  color: theme('colors.slate.400');
+  border-color: theme('colors.slate.200');
+
+  &:hover {
+    background: theme('colors.red.50');
+    color: theme('colors.red.500');
+    border-color: theme('colors.red.200');
+  }
+}
+
+:host-context(.dark) .action-btn-reject {
+  border-color: theme('colors.slate.700');
+
+  &:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: theme('colors.red.800');
+  }
+}
+
+// Action preview styling
+.action-preview {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+// Action card entrance animation
+.action-card {
+  animation: actionSlideIn 0.2s ease-out;
+}
+
+@keyframes actionSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// Thinking dots animation
+.thinking-dots {
+  .dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: thinkingBounce 1.4s ease-in-out infinite;
+
+    &:nth-child(1) { animation-delay: 0s; }
+    &:nth-child(2) { animation-delay: 0.2s; }
+    &:nth-child(3) { animation-delay: 0.4s; }
+  }
+}
+
+@keyframes thinkingBounce {
+  0%, 80%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

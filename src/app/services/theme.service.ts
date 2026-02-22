@@ -14,7 +14,7 @@ export interface ColorThemeOption {
 export const COLOR_THEME_OPTIONS: ColorThemeOption[] = [
   { value: 'blue', label: 'Azul', icon: 'water_drop', color: '#135bec', description: 'Azul eléctrico, el tema clásico' },
   { value: 'green', label: 'Verde', icon: 'eco', color: '#10b981', description: 'Verde esmeralda, fresco y natural' },
-  { value: 'rose', label: 'Rosa', icon: 'favorite', color: '#f43f5e', description: 'Rosa intenso, vibrante y moderno' },
+  { value: 'rose', label: 'Rosa', icon: 'favorite', color: '#ec4899', description: 'Rosa suave, vibrante y moderno' },
   { value: 'amber', label: 'Ámbar', icon: 'light_mode', color: '#f59e0b', description: 'Ámbar cálido, acogedor y dorado' },
   { value: 'violet', label: 'Violeta', icon: 'auto_awesome', color: '#8b5cf6', description: 'Violeta elegante, creativo y único' },
   { value: 'custom', label: 'Personalizado', icon: 'palette', color: '#135bec', description: 'Elige tu propio color de acento' },

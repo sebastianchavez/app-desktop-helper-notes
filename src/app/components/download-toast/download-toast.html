@@ -1,0 +1,53 @@
+@if (downloads().length > 0) {
+<div class="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm">
+  @for (dl of downloads(); track dl.fileName) {
+    <div
+      class="flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl border backdrop-blur-sm animate-slide-in"
+      [class]="dl.status === 'done'
+        ? 'bg-white/95 dark:bg-slate-800/95 border-green-200 dark:border-green-800'
+        : dl.status === 'error'
+          ? 'bg-white/95 dark:bg-slate-800/95 border-red-200 dark:border-red-800'
+          : 'bg-white/95 dark:bg-slate-800/95 border-slate-200 dark:border-slate-700'"
+    >
+      @if (dl.status === 'saving') {
+        <div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+          <span class="material-symbols-outlined text-primary text-lg animate-pulse">downloading</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{{ dl.fileName }}</p>
+          <p class="text-[10px] text-slate-400">{{ 'DOWNLOAD_TOAST.SAVING' | translate }}</p>
+        </div>
+      } @else if (dl.status === 'done') {
+        <div class="w-8 h-8 rounded-full bg-green-50 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+          <span class="material-symbols-outlined text-green-500 text-lg">check_circle</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{{ dl.fileName }}</p>
+          <p class="text-[10px] text-slate-400 truncate" [title]="dl.filePath">{{ getShortPath(dl.filePath) }}</p>
+        </div>
+        <button
+          (click)="openInFolder(dl.filePath)"
+          class="flex-shrink-0 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+          [title]="'DOWNLOAD_TOAST.OPEN_LOCATION' | translate"
+        >
+          <span class="material-symbols-outlined text-sm text-primary">folder_open</span>
+        </button>
+      } @else {
+        <div class="w-8 h-8 rounded-full bg-red-50 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+          <span class="material-symbols-outlined text-red-500 text-lg">error</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{{ dl.fileName }}</p>
+          <p class="text-[10px] text-red-400">{{ 'DOWNLOAD_TOAST.ERROR' | translate }}</p>
+        </div>
+      }
+      <button
+        (click)="dismiss(dl.fileName)"
+        class="flex-shrink-0 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+      >
+        <span class="material-symbols-outlined text-xs text-slate-400">close</span>
+      </button>
+    </div>
+  }
+</div>
+}

@@ -8,19 +8,32 @@ import {
   viewChild,
   HostListener,
   untracked,
+  OnDestroy,
+  output,
 } from '@angular/core';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { NoteService } from '../../services/note.service';
+import { DownloadService } from '../../services/download.service';
 
 @Component({
   selector: 'app-note-editor',
   templateUrl: './note-editor.html',
   styleUrl: './note-editor.scss',
+  imports: [TranslateModule],
 })
-export class NoteEditor {
+export class NoteEditor implements OnDestroy {
   protected readonly noteService = inject(NoteService);
+  private readonly sanitizer = inject(DomSanitizer);
+  private readonly downloadService = inject(DownloadService);
+  private readonly translate = inject(TranslateService);
+
+  readonly aiChatToggle = output<void>();
 
   protected title = signal('');
   protected content = signal('');
+  protected pdfUrl = signal<SafeResourceUrl | null>(null);
+  private pdfBlobUrl: string | null = null;
 
   // Toolbar state signals
   protected isBold = signal(false);
@@ -34,6 +47,7 @@ export class NoteEditor {
   protected activeFontSize = signal('3');
   protected activeTextColor = signal('#ffffff');
   protected showDownloadMenu = signal(false);
+  protected wordWrap = signal(false);
 
   private editorRef = viewChild<ElementRef<HTMLDivElement>>('editorEl');
   private downloadDropdownRef = viewChild<ElementRef<HTMLDivElement>>('downloadDropdown');
@@ -49,16 +63,82 @@ export class NoteEditor {
         this.skipNextSync = false;
         return;
       }
+
+      // Clean up previous PDF blob URL
+      untracked(() => this.clearPdfUrl());
+
       if (note) {
         this.title.set(note.title);
         this.content.set(note.content);
-        // Directly update the contenteditable element
-        const el = untracked(() => this.editorRef()?.nativeElement);
-        if (el) {
-          el.innerHTML = note.content || '';
+
+        if (note.file_type === 'pdf') {
+          // Load PDF data asynchronously
+          untracked(() => this.loadPdfData(note.id));
+        } else {
+          // Defer DOM update so Angular renders the @if block first
+          const noteContent = note.content || '';
+          setTimeout(() => {
+            const el = this.editorRef()?.nativeElement;
+            if (el) {
+              el.innerHTML = noteContent;
+            }
+          });
         }
       }
     });
+  }
+
+  ngOnDestroy(): void {
+    this.clearPdfUrl();
+  }
+
+  private clearPdfUrl(): void {
+    if (this.pdfBlobUrl) {
+      URL.revokeObjectURL(this.pdfBlobUrl);
+      this.pdfBlobUrl = null;
+    }
+    this.pdfUrl.set(null);
+  }
+
+  private async loadPdfData(noteId: number): Promise<void> {
+    try {
+      const fullNote = await window.electronAPI.notesGetById(noteId);
+      if (!fullNote?.file_data) return;
+      // Check the note is still selected (could have changed during async load)
+      if (this.noteService.selectedNoteId() !== noteId) return;
+
+      const binaryStr = atob(fullNote.file_data);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      this.pdfBlobUrl = URL.createObjectURL(blob);
+      this.pdfUrl.set(this.sanitizer.bypassSecurityTrustResourceUrl(this.pdfBlobUrl));
+    } catch (err) {
+      console.error('Error loading PDF data:', err);
+    }
+  }
+
+  protected async downloadPdf(): Promise<void> {
+    const note = this.noteService.selectedNote();
+    if (!note) return;
+    const fileName = (note.title || 'documento') + '.pdf';
+    this.downloadService.showSaving(fileName);
+    try {
+      const fullNote = await window.electronAPI.notesGetById(note.id);
+      if (!fullNote?.file_data) { this.downloadService.showError(fileName); return; }
+      const binaryStr = atob(fullNote.file_data);
+      const buffer = Array.from(binaryStr, (c) => c.charCodeAt(0));
+      const result = await window.electronAPI.fileSaveAsBuffer({
+        defaultName: fileName,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+        buffer,
+      });
+      if (result.success && result.filePath) {
+        this.downloadService.showDone(fileName, result.filePath);
+      } else {
+        this.downloadService.dismiss(fileName);
+      }
+    } catch { this.downloadService.showError(fileName); }
   }
 
   protected readonly wordCount = computed(() => {
@@ -73,7 +153,7 @@ export class NoteEditor {
     const note = this.noteService.selectedNote();
     if (!note) return '';
     const date = new Date(note.updated_at + 'Z');
-    return date.toLocaleDateString('es', {
+    return date.toLocaleDateString(this.translate.currentLang || 'es', {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
@@ -142,6 +222,76 @@ export class NoteEditor {
     this.refocusEditor();
     this.refreshToolbarState();
     this.onEditorInput();
+  }
+
+  // ── Image support ──
+
+  /** Handle paste: intercept images from clipboard */
+  onEditorPaste(event: ClipboardEvent): void {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        event.preventDefault();
+        const file = items[i].getAsFile();
+        if (file) this.insertImageFile(file);
+        return;
+      }
+    }
+  }
+
+  /** Handle drop: intercept image files dropped into the editor */
+  onEditorDrop(event: DragEvent): void {
+    const files = event.dataTransfer?.files;
+    if (!files) return;
+
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].type.startsWith('image/')) {
+        event.preventDefault();
+        this.insertImageFile(files[i]);
+        return;
+      }
+    }
+  }
+
+  /** Open file picker to insert an image */
+  insertImageFromFile(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (file) this.insertImageFile(file);
+    };
+    input.click();
+  }
+
+  /** Read an image file as base64 data URL and insert it at cursor */
+  private insertImageFile(file: File): void {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      this.refocusEditor();
+      document.execCommand('insertImage', false, dataUrl);
+      // After insertion, style the image
+      setTimeout(() => {
+        const el = this.editorRef()?.nativeElement;
+        if (el) {
+          el.querySelectorAll('img:not([data-styled])').forEach((img: Element) => {
+            const imgEl = img as HTMLImageElement;
+            imgEl.style.maxWidth = '100%';
+            imgEl.style.height = 'auto';
+            imgEl.style.borderRadius = '8px';
+            imgEl.style.margin = '8px 0';
+            imgEl.setAttribute('data-styled', '1');
+          });
+          this.content.set(el.innerHTML);
+          this.scheduleSave();
+        }
+      });
+    };
+    reader.readAsDataURL(file);
   }
 
   /** Refresh toolbar active states based on current selection */
@@ -237,12 +387,59 @@ export class NoteEditor {
     const noteTitle = this.title() || 'nota';
     const plainText = this.stripHtml(this.content());
     const textContent = `${noteTitle}\n${'='.repeat(noteTitle.length)}\n\n${plainText}`;
+    const fileName = `${this.sanitizeFilename(noteTitle)}.txt`;
+    this.downloadService.showSaving(fileName);
+    try {
+      const result = await window.electronAPI.fileSaveAs({
+        defaultName: fileName,
+        filters: [{ name: this.translate.instant('NOTE_EDITOR.FILTER_TEXT'), extensions: ['txt'] }],
+        content: textContent,
+      });
+      if (result.success && result.filePath) {
+        this.downloadService.showDone(fileName, result.filePath);
+      } else {
+        this.downloadService.dismiss(fileName);
+      }
+    } catch { this.downloadService.showError(fileName); }
+  }
 
-    await window.electronAPI.fileSaveAs({
-      defaultName: `${this.sanitizeFilename(noteTitle)}.txt`,
-      filters: [{ name: 'Archivo de texto', extensions: ['txt'] }],
-      content: textContent,
-    });
+  // ── Download as .html ──
+  async downloadAsHtml(): Promise<void> {
+    this.showDownloadMenu.set(false);
+    const noteTitle = this.title() || 'nota';
+    const htmlBody = this.content() || '';
+
+    // If content already is a full HTML document, export it as-is
+    const isFullHtml = /<html[\s>]/i.test(htmlBody);
+    const fullHtml = isFullHtml
+      ? htmlBody
+      : `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${this.escapeXml(noteTitle)}</title>
+</head>
+<body>
+  <h1>${this.escapeXml(noteTitle)}</h1>
+  ${htmlBody}
+</body>
+</html>`;
+    const fileName = `${this.sanitizeFilename(noteTitle)}.html`;
+    this.downloadService.showSaving(fileName);
+    try {
+      const result = await window.electronAPI.fileSaveAs({
+        defaultName: fileName,
+        filters: [{ name: this.translate.instant('NOTE_EDITOR.FILTER_HTML'), extensions: ['html', 'htm'] }],
+        content: fullHtml,
+        encoding: 'utf-8',
+      });
+      if (result.success && result.filePath) {
+        this.downloadService.showDone(fileName, result.filePath);
+      } else {
+        this.downloadService.dismiss(fileName);
+      }
+    } catch { this.downloadService.showError(fileName); }
   }
 
   // ── Download as .docx ──
@@ -250,15 +447,42 @@ export class NoteEditor {
     this.showDownloadMenu.set(false);
     const noteTitle = this.title() || 'nota';
     const htmlBody = this.content() || '';
+    const fileName = `${this.sanitizeFilename(noteTitle)}.docx`;
+    this.downloadService.showSaving(fileName);
+    try {
+      const docxBlob = this.generateDocxBytes(noteTitle, htmlBody);
+      const buffer = Array.from(docxBlob);
+      const result = await window.electronAPI.fileSaveAsBuffer({
+        defaultName: fileName,
+        filters: [{ name: this.translate.instant('NOTE_EDITOR.FILTER_WORD'), extensions: ['docx'] }],
+        buffer,
+      });
+      if (result.success && result.filePath) {
+        this.downloadService.showDone(fileName, result.filePath);
+      } else {
+        this.downloadService.dismiss(fileName);
+      }
+    } catch { this.downloadService.showError(fileName); }
+  }
 
-    const docxBlob = this.generateDocxBytes(noteTitle, htmlBody);
-    const buffer = Array.from(docxBlob);
-
-    await window.electronAPI.fileSaveAsBuffer({
-      defaultName: `${this.sanitizeFilename(noteTitle)}.docx`,
-      filters: [{ name: 'Documento Word', extensions: ['docx'] }],
-      buffer,
-    });
+  // ── Download as .pdf (note content rendered to PDF) ──
+  async downloadAsPdf(): Promise<void> {
+    this.showDownloadMenu.set(false);
+    const noteTitle = this.title() || 'nota';
+    const fileName = `${this.sanitizeFilename(noteTitle)}.pdf`;
+    const htmlContent = `<h1>${this.escapeXml(noteTitle)}</h1>${this.content() || ''}`;
+    this.downloadService.showSaving(fileName);
+    try {
+      const result = await window.electronAPI.filePrintToPdf({
+        defaultName: fileName,
+        htmlContent,
+      });
+      if (result.success && result.filePath) {
+        this.downloadService.showDone(fileName, result.filePath);
+      } else {
+        this.downloadService.dismiss(fileName);
+      }
+    } catch { this.downloadService.showError(fileName); }
   }
 
   private sanitizeFilename(name: string): string {

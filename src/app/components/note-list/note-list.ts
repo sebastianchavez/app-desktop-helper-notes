@@ -1,14 +1,22 @@
-import { Component, inject, OnInit, signal, effect } from '@angular/core';
+import { Component, inject, OnInit, signal, effect, input, output } from '@angular/core';
+import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { NoteService } from '../../services/note.service';
+import { AiChatService } from '../../services/ai-chat.service';
 
 @Component({
   selector: 'app-note-list',
   templateUrl: './note-list.html',
   styleUrl: './note-list.scss',
+  imports: [TranslateModule],
 })
 export class NoteList implements OnInit {
   protected readonly noteService = inject(NoteService);
+  private readonly translate = inject(TranslateService);
+  private readonly aiChatService = inject(AiChatService);
   protected searchQuery = signal('');
+
+  readonly collapsed = input(false);
+  readonly collapseToggle = output();
 
   constructor() {
     // Reload notes when folder changes
@@ -31,6 +39,7 @@ export class NoteList implements OnInit {
   }
 
   async selectNote(id: number): Promise<void> {
+    if (this.aiChatService.isStreaming()) return;
     await this.noteService.selectNote(id);
   }
 
@@ -40,16 +49,34 @@ export class NoteList implements OnInit {
 
   async deleteNote(id: number, event: Event): Promise<void> {
     event.stopPropagation();
+    const confirmed = await window.electronAPI.dialogConfirm({
+      title: this.translate.instant('NOTE_LIST.DELETE_TITLE'),
+      message: this.translate.instant('NOTE_LIST.DELETE_MESSAGE'),
+    });
+    if (!confirmed) return;
     await this.noteService.deleteNote(id);
   }
 
+  async openInNewWindow(id: number): Promise<void> {
+    await window.electronAPI.windowOpenNote(id);
+  }
+
+  async importNotes(): Promise<void> {
+    await this.noteService.importNotes();
+  }
+
+  onDragStart(event: DragEvent, noteId: number): void {
+    event.dataTransfer?.setData('application/note-id', noteId.toString());
+    event.dataTransfer!.effectAllowed = 'move';
+  }
+
   getPreview(content: string): string {
-    if (!content) return 'Sin contenido...';
+    if (!content) return this.translate.instant('NOTE_LIST.NO_CONTENT');
     // Strip HTML tags to show plain text preview
     const tmp = document.createElement('div');
     tmp.innerHTML = content;
     const text = tmp.textContent || tmp.innerText || '';
-    if (!text.trim()) return 'Sin contenido...';
+    if (!text.trim()) return this.translate.instant('NOTE_LIST.NO_CONTENT');
     return text.length > 100 ? text.substring(0, 100) + '...' : text;
   }
 
@@ -61,10 +88,10 @@ export class NoteList implements OnInit {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMin < 1) return 'ahora';
+    if (diffMin < 1) return this.translate.instant('NOTE_LIST.TIME_NOW');
     if (diffMin < 60) return `${diffMin}m`;
     if (diffHours < 24) return `${diffHours}h`;
     if (diffDays < 7) return `${diffDays}d`;
-    return date.toLocaleDateString('es', { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString(this.translate.currentLang || 'es', { month: 'short', day: 'numeric' });
   }
 }

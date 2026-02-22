@@ -6,7 +6,7 @@
   },
   "newProjectRoot": "projects",
   "projects": {
-    "app-desktop-helper-note": {
+    "app-desktop-helper-notes": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -62,10 +62,10 @@
           "builder": "@angular/build:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "app-desktop-helper-note:build:production"
+              "buildTarget": "app-desktop-helper-notes:build:production"
             },
             "development": {
-              "buildTarget": "app-desktop-helper-note:build:development"
+              "buildTarget": "app-desktop-helper-notes:build:development"
             }
           },
           "defaultConfiguration": "development"

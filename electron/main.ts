@@ -13,7 +13,7 @@ function createTray() {
 
     const contextMenu = Menu.buildFromTemplate([
         {
-            label: 'Abrir Helper Note',
+            label: 'Abrir Helper Notes',
             click: () => {
                 if (win) {
                     win.show();
@@ -31,7 +31,7 @@ function createTray() {
         },
     ]);
 
-    tray.setToolTip('Helper Note');
+    tray.setToolTip('Helper Notes');
     tray.setContextMenu(contextMenu);
 
     tray.on('double-click', () => {
@@ -48,7 +48,7 @@ function createWindow() {
         height: 800,
         minWidth: 800,
         minHeight: 600,
-        title: "Helper Note",
+        title: "Helper Notes",
         icon: path.join(__dirname, '../assets/favicon.ico'),
         resizable: true,
         webPreferences: {
@@ -66,7 +66,7 @@ function createWindow() {
     } else {
         // PROD: carga dist angular
         win.loadFile(
-            path.join(__dirname, '../dist/app-desktop-helper-note/browser/index.html')
+            path.join(__dirname, '../dist/app-desktop-helper-notes/browser/index.html')
         );
     }
     win.setMenu(null);

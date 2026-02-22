@@ -60,8 +60,6 @@
 .editor-content {
   font-family: 'Inter', sans-serif;
   outline: none;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
 
   h1 {
     font-size: 2em;
@@ -117,5 +115,23 @@
   a {
     color: theme('colors.primary');
     text-decoration: underline;
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 8px 0;
+    cursor: default;
+    display: block;
+    transition: box-shadow 0.2s ease;
+
+    &:hover {
+      box-shadow: 0 0 0 2px theme('colors.primary / 40%');
+    }
+
+    &::selection {
+      background: theme('colors.primary / 20%');
+    }
   }
 }

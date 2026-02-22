@@ -1,5 +1,31 @@
-<main class="flex-1 flex flex-col bg-white dark:bg-background-dark h-full">
+<main class="flex-1 flex flex-col bg-white dark:bg-background-dark h-full min-w-0">
   @if (noteService.selectedNote(); as note) {
+    @if (note.file_type === 'pdf') {
+    <!-- PDF Viewer Mode -->
+    <div class="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex-shrink-0">
+      <span class="material-symbols-outlined text-xl text-red-500">picture_as_pdf</span>
+      <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-1 truncate">{{ note.title }}</h2>
+      <button
+        class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary hover:bg-primary/90 text-white transition-colors"
+        (click)="downloadPdf()"
+      >
+        <span class="material-symbols-outlined text-sm">download</span>
+        {{ 'NOTE_EDITOR.DOWNLOAD_PDF' | translate }}
+      </button>
+    </div>
+    <div class="flex-1 overflow-hidden">
+      @if (pdfUrl()) {
+        <embed [src]="pdfUrl()!" type="application/pdf" class="w-full h-full" />
+      } @else {
+        <div class="flex-1 flex items-center justify-center h-full">
+          <div class="text-center text-slate-400">
+            <span class="material-symbols-outlined text-5xl mb-3 block animate-pulse">picture_as_pdf</span>
+            <p class="text-sm">{{ 'NOTE_EDITOR.LOADING_PDF' | translate }}</p>
+          </div>
+        </div>
+      }
+    </div>
+    } @else {
     <!-- Toolbar -->
     <div
       class="flex items-center gap-1 px-4 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex-shrink-0 flex-wrap"
@@ -10,10 +36,10 @@
         (change)="onFormatBlock($any($event.target).value); $any($event.target).value = activeBlockFormat()"
         [value]="activeBlockFormat()"
       >
-        <option value="p">Párrafo</option>
-        <option value="h1">Título 1</option>
-        <option value="h2">Título 2</option>
-        <option value="h3">Título 3</option>
+        <option value="p">{{ 'NOTE_EDITOR.PARAGRAPH' | translate }}</option>
+        <option value="h1">{{ 'NOTE_EDITOR.HEADING1' | translate }}</option>
+        <option value="h2">{{ 'NOTE_EDITOR.HEADING2' | translate }}</option>
+        <option value="h3">{{ 'NOTE_EDITOR.HEADING3' | translate }}</option>
       </select>
 
       <!-- Font size select -->
@@ -37,7 +63,7 @@
       <button
         class="toolbar-btn"
         [class.active]="isBold()"
-        title="Negrita (Ctrl+B)"
+        [title]="'NOTE_EDITOR.BOLD' | translate"
         (click)="execCommand('bold')"
       >
         <span class="material-symbols-outlined text-base">format_bold</span>
@@ -45,7 +71,7 @@
       <button
         class="toolbar-btn"
         [class.active]="isItalic()"
-        title="Cursiva (Ctrl+I)"
+        [title]="'NOTE_EDITOR.ITALIC' | translate"
         (click)="execCommand('italic')"
       >
         <span class="material-symbols-outlined text-base">format_italic</span>
@@ -53,7 +79,7 @@
       <button
         class="toolbar-btn"
         [class.active]="isUnderline()"
-        title="Subrayado (Ctrl+U)"
+        [title]="'NOTE_EDITOR.UNDERLINE' | translate"
         (click)="execCommand('underline')"
       >
         <span class="material-symbols-outlined text-base">format_underlined</span>
@@ -61,7 +87,7 @@
       <button
         class="toolbar-btn"
         [class.active]="isStrike()"
-        title="Tachado"
+        [title]="'NOTE_EDITOR.STRIKETHROUGH' | translate"
         (click)="execCommand('strikeThrough')"
       >
         <span class="material-symbols-outlined text-base">strikethrough_s</span>
@@ -76,7 +102,7 @@
           class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
           [value]="activeTextColor()"
           (input)="onTextColor($any($event.target).value)"
-          title="Color de texto"
+          [title]="'NOTE_EDITOR.TEXT_COLOR' | translate"
         />
         <span class="material-symbols-outlined text-base pointer-events-none">format_color_text</span>
         <div
@@ -92,7 +118,7 @@
           class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
           value="#ffff00"
           (input)="onHighlightColor($any($event.target).value)"
-          title="Color de resaltado"
+          [title]="'NOTE_EDITOR.HIGHLIGHT_COLOR' | translate"
         />
         <span class="material-symbols-outlined text-base pointer-events-none">format_color_fill</span>
       </div>
@@ -103,7 +129,7 @@
       <button
         class="toolbar-btn"
         [class.active]="activeAlign() === 'left'"
-        title="Alinear a la izquierda"
+        [title]="'NOTE_EDITOR.ALIGN_LEFT' | translate"
         (click)="execCommand('justifyLeft')"
       >
         <span class="material-symbols-outlined text-base">format_align_left</span>
@@ -111,7 +137,7 @@
       <button
         class="toolbar-btn"
         [class.active]="activeAlign() === 'center'"
-        title="Centrar"
+        [title]="'NOTE_EDITOR.ALIGN_CENTER' | translate"
         (click)="execCommand('justifyCenter')"
       >
         <span class="material-symbols-outlined text-base">format_align_center</span>
@@ -119,7 +145,7 @@
       <button
         class="toolbar-btn"
         [class.active]="activeAlign() === 'right'"
-        title="Alinear a la derecha"
+        [title]="'NOTE_EDITOR.ALIGN_RIGHT' | translate"
         (click)="execCommand('justifyRight')"
       >
         <span class="material-symbols-outlined text-base">format_align_right</span>
@@ -127,7 +153,7 @@
       <button
         class="toolbar-btn"
         [class.active]="activeAlign() === 'justify'"
-        title="Justificar"
+        [title]="'NOTE_EDITOR.JUSTIFY' | translate"
         (click)="execCommand('justifyFull')"
       >
         <span class="material-symbols-outlined text-base">format_align_justify</span>
@@ -139,7 +165,7 @@
       <button
         class="toolbar-btn"
         [class.active]="isUnorderedList()"
-        title="Lista con viñetas"
+        [title]="'NOTE_EDITOR.BULLET_LIST' | translate"
         (click)="execCommand('insertUnorderedList')"
       >
         <span class="material-symbols-outlined text-base">format_list_bulleted</span>
@@ -147,7 +173,7 @@
       <button
         class="toolbar-btn"
         [class.active]="isOrderedList()"
-        title="Lista numerada"
+        [title]="'NOTE_EDITOR.NUMBERED_LIST' | translate"
         (click)="execCommand('insertOrderedList')"
       >
         <span class="material-symbols-outlined text-base">format_list_numbered</span>
@@ -156,18 +182,48 @@
       <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
 
       <!-- Indent -->
-      <button class="toolbar-btn" title="Aumentar sangría" (click)="execCommand('indent')">
+      <button class="toolbar-btn" [title]="'NOTE_EDITOR.INDENT' | translate" (click)="execCommand('indent')">
         <span class="material-symbols-outlined text-base">format_indent_increase</span>
       </button>
-      <button class="toolbar-btn" title="Reducir sangría" (click)="execCommand('outdent')">
+      <button class="toolbar-btn" [title]="'NOTE_EDITOR.OUTDENT' | translate" (click)="execCommand('outdent')">
         <span class="material-symbols-outlined text-base">format_indent_decrease</span>
       </button>
 
       <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
 
       <!-- Clear formatting -->
-      <button class="toolbar-btn" title="Limpiar formato" (click)="clearFormatting()">
+      <button class="toolbar-btn" [title]="'NOTE_EDITOR.CLEAR_FORMAT' | translate" (click)="clearFormatting()">
         <span class="material-symbols-outlined text-base">format_clear</span>
+      </button>
+
+      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+      <!-- Insert image -->
+      <button class="toolbar-btn" [title]="'NOTE_EDITOR.INSERT_IMAGE' | translate" (click)="insertImageFromFile()">
+        <span class="material-symbols-outlined text-base">image</span>
+      </button>
+
+      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+      <!-- Word wrap toggle -->
+      <button
+        class="toolbar-btn"
+        [class.active]="wordWrap()"
+        [title]="wordWrap() ? ('NOTE_EDITOR.SCROLL_HORIZONTAL' | translate) : ('NOTE_EDITOR.WORD_WRAP' | translate)"
+        (click)="wordWrap.set(!wordWrap())"
+      >
+        <span class="material-symbols-outlined text-base">wrap_text</span>
+      </button>
+
+      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+      <!-- AI Chat toggle -->
+      <button
+        class="toolbar-btn"
+        [title]="'NOTE_EDITOR.AI_ASSISTANT' | translate"
+        (click)="aiChatToggle.emit()"
+      >
+        <span class="material-symbols-outlined text-base">smart_toy</span>
       </button>
 
       <!-- Spacer to push download to the right -->
@@ -177,7 +233,7 @@
       <div class="relative" #downloadDropdown>
         <button
           class="toolbar-btn !w-auto px-2 gap-1"
-          title="Descargar nota"
+          [title]="'NOTE_EDITOR.DOWNLOAD_NOTE' | translate"
           (click)="showDownloadMenu.set(!showDownloadMenu())"
         >
           <span class="material-symbols-outlined text-base">download</span>
@@ -192,14 +248,28 @@
               (click)="downloadAsTxt()"
             >
               <span class="material-symbols-outlined text-sm">description</span>
-              Texto plano (.txt)
+              {{ 'NOTE_EDITOR.PLAIN_TEXT' | translate }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+              (click)="downloadAsHtml()"
+            >
+              <span class="material-symbols-outlined text-sm">code</span>
+              {{ 'NOTE_EDITOR.HTML_DOC' | translate }}
             </button>
             <button
               class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
               (click)="downloadAsDocx()"
             >
               <span class="material-symbols-outlined text-sm">article</span>
-              Documento Word (.docx)
+              {{ 'NOTE_EDITOR.WORD_DOC' | translate }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+              (click)="downloadAsPdf()"
+            >
+              <span class="material-symbols-outlined text-sm">picture_as_pdf</span>
+              {{ 'NOTE_EDITOR.PDF_DOC' | translate }}
             </button>
           </div>
         }
@@ -207,9 +277,13 @@
     </div>
 
     <!-- Editor Content Area -->
-    <div class="flex-1 overflow-y-auto p-12 lg:px-24 xl:px-32 custom-scrollbar">
-      <div class="max-w-3xl mx-auto">
-        <div class="mb-8">
+    <div class="flex-1 overflow-y-auto overflow-x-auto custom-scrollbar">
+      <div class="px-6 py-8">
+        <div class="mb-8"
+          [style.word-wrap]="wordWrap() ? 'break-word' : 'normal'"
+          [style.overflow-wrap]="wordWrap() ? 'break-word' : 'normal'"
+          [style.white-space]="wordWrap() ? 'normal' : 'nowrap'"
+        >
           @if (folderName(); as fname) {
             <div
               class="flex items-center gap-2 text-xs font-medium text-primary uppercase tracking-widest mb-4"
@@ -221,7 +295,7 @@
           <input
             class="w-full text-4xl font-extrabold border-none bg-transparent p-0 focus:ring-0 focus:outline-none text-slate-900 dark:text-white placeholder-slate-300 dark:placeholder-slate-600"
             type="text"
-            placeholder="Título de la nota..."
+            [placeholder]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate"
             [value]="title()"
             (input)="onTitleChange($any($event.target).value)"
           />
@@ -236,12 +310,18 @@
         <!-- Rich text editable area -->
         <div
           #editorEl
-          class="editor-content min-h-[60vh] text-lg leading-relaxed text-slate-700 dark:text-slate-300 bg-transparent focus:outline-none"
+          class="editor-content text-lg leading-relaxed text-slate-700 dark:text-slate-300 bg-transparent focus:outline-none"
+          [style.word-wrap]="wordWrap() ? 'break-word' : 'normal'"
+          [style.overflow-wrap]="wordWrap() ? 'break-word' : 'normal'"
+          [style.white-space]="wordWrap() ? 'normal' : 'nowrap'"
           contenteditable="true"
           (input)="onEditorInput()"
+          (paste)="onEditorPaste($event)"
+          (drop)="onEditorDrop($event)"
+          (dragover)="$event.preventDefault()"
           (mouseup)="refreshToolbarState()"
           (keyup)="refreshToolbarState()"
-          data-placeholder="Empieza a escribir..."
+          [attr.data-placeholder]="'NOTE_EDITOR.START_WRITING' | translate"
         ></div>
       </div>
     </div>
@@ -251,24 +331,25 @@
       class="h-10 border-t border-slate-200 dark:border-slate-800 px-6 flex items-center justify-between bg-slate-50 dark:bg-background-dark/50 flex-shrink-0"
     >
       <p class="text-[10px] text-slate-400 uppercase tracking-widest">
-        Última edición: {{ lastEdited() }}
+        {{ 'NOTE_EDITOR.LAST_EDIT' | translate }}: {{ lastEdited() }}
       </p>
       <div class="flex items-center gap-4">
         <span class="text-[10px] text-slate-400 uppercase tracking-widest"
-          >{{ wordCount() }} palabras</span
+          >{{ wordCount() }} {{ 'NOTE_EDITOR.WORDS' | translate }}</span
         >
         <span class="text-[10px] text-slate-400 uppercase tracking-widest"
-          >{{ charCount() }} caracteres</span
+          >{{ charCount() }} {{ 'NOTE_EDITOR.CHARACTERS' | translate }}</span
         >
       </div>
     </footer>
+    }
   } @else {
     <!-- Empty state -->
     <div class="flex-1 flex items-center justify-center">
       <div class="text-center text-slate-400">
         <span class="material-symbols-outlined text-6xl mb-4 block opacity-30">edit_note</span>
-        <p class="text-lg font-medium mb-1">Ninguna nota seleccionada</p>
-        <p class="text-sm">Selecciona una nota de la lista o crea una nueva</p>
+        <p class="text-lg font-medium mb-1">{{ 'NOTE_EDITOR.NO_NOTE_SELECTED' | translate }}</p>
+        <p class="text-sm">{{ 'NOTE_EDITOR.SELECT_OR_CREATE' | translate }}</p>
       </div>
     </div>
   }
