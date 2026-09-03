@@ -1,0 +1,114 @@
+<main class="transfer-page">
+  <header class="page-header">
+    <button class="icon-button" (click)="goBack()" title="Volver a las notas">
+      <span class="material-symbols-outlined">arrow_back</span>
+    </button>
+    <div>
+      <h2>Importar y exportar</h2>
+      <p>Respalda carpetas y notas completas o recupera una estructura anterior.</p>
+    </div>
+  </header>
+
+  <div class="page-content">
+    <section class="panel import-panel">
+      <div class="panel-heading">
+        <span class="material-symbols-outlined">input</span>
+        <div>
+          <h3>Importar estructura</h3>
+          <p>Admite respaldos JSON y archivos ZIP creados por Helper Notes, completos o parciales.</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="primary-button" [disabled]="busy()" (click)="importFiles()">
+          <span class="material-symbols-outlined">upload_file</span>
+          Seleccionar JSON o ZIP
+        </button>
+        <button class="secondary-button" [disabled]="busy()" (click)="importFolder()">
+          <span class="material-symbols-outlined">folder_open</span>
+          Seleccionar una carpeta
+        </button>
+      </div>
+      <p class="hint">Al seleccionar una carpeta, se buscan respaldos compatibles dentro de ella y sus subcarpetas. Los nombres repetidos se importan como carpetas nuevas.</p>
+    </section>
+
+    <section class="panel export-panel">
+      <div class="panel-heading export-heading">
+        <span class="material-symbols-outlined">output</span>
+        <div class="grow">
+          <h3>Exportar selección</h3>
+          <p>JSON conserva la estructura interna; ZIP comprime carpetas y archivos físicos en sus formatos reales.</p>
+        </div>
+        <button class="text-button" (click)="selectEverything()">Seleccionar todo</button>
+        <button class="text-button" (click)="clearSelection()">Limpiar</button>
+      </div>
+
+      <div class="selection-grid">
+        <div class="selection-column">
+          <h4>Carpetas</h4>
+          @for (folder of noteService.folders(); track folder.id) {
+            <label class="selection-row">
+              <input type="checkbox" [checked]="isFolderSelected(folder.id)" (change)="toggleFolder(folder.id, $any($event.target).checked)" />
+              <span class="material-symbols-outlined folder-icon">folder</span>
+              <span class="item-name">{{ folder.name }}</span>
+              <span class="count">{{ folderNoteCount(folder.id) }}</span>
+            </label>
+          }
+          @if (noteService.folders().length === 0) {
+            <p class="empty">No hay carpetas.</p>
+          }
+        </div>
+
+        <div class="selection-column">
+          <h4>Notas individuales</h4>
+          @for (note of allNotes(); track note.id) {
+            <label class="selection-row" [class.covered]="noteCoveredByFolder(note)">
+              <input
+                type="checkbox"
+                [checked]="isNoteSelected(note)"
+                [disabled]="noteCoveredByFolder(note)"
+                (change)="toggleNote(note.id, $any($event.target).checked)"
+              />
+              <span class="material-symbols-outlined note-icon">{{ note.file_type === 'pdf' ? 'picture_as_pdf' : note.file_type === 'xlsx' ? 'table_chart' : note.file_type === 'pptx' ? 'slideshow' : 'description' }}</span>
+              <span class="item-name">
+                {{ note.title || 'Sin título' }}
+                <small>{{ folderName(note.folder_id) }}</small>
+              </span>
+            </label>
+          } @empty {
+            <p class="empty">No hay notas.</p>
+          }
+        </div>
+      </div>
+
+      <footer class="export-footer">
+        <div>
+          <strong>{{ selectedItemCount() }}</strong> elemento(s) seleccionado(s) ·
+          <strong>{{ selectedNoteCount() }}</strong> nota(s) incluidas
+        </div>
+        <div class="actions">
+          <button class="secondary-button" [disabled]="busy() || selectedItemCount() === 0" (click)="exportSelection('json')">
+            <span class="material-symbols-outlined">data_object</span>
+            Exportar JSON
+          </button>
+          <button class="primary-button" [disabled]="busy() || selectedItemCount() === 0" (click)="exportSelection('zip')">
+            <span class="material-symbols-outlined">folder_zip</span>
+            Exportar ZIP
+          </button>
+        </div>
+      </footer>
+    </section>
+
+    @if (status()) {
+      <section class="status-panel" [class.has-errors]="errors().length > 0">
+        @if (busy()) { <span class="spinner"></span> }
+        <div class="grow">
+          <p>{{ status() }}</p>
+          @for (error of errors(); track error) { <small>{{ error }}</small> }
+        </div>
+        @if (lastExportPath()) {
+          <button class="text-button" (click)="showExportedFile()">Mostrar archivo</button>
+        }
+      </section>
+    }
+  </div>
+</main>

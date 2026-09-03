@@ -1,3 +1,26 @@
 :host {
   display: contents;
 }
+
+.context-action {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.65rem;
+  border-radius: 0.4rem;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  font-size: 0.875rem;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.context-action:hover,
+.context-action:focus-visible {
+  background: rgb(16 185 129 / 0.12);
+  color: rgb(16 185 129);
+  outline: none;
+}
+
+.context-action .material-symbols-outlined {
+  font-size: 1.15rem;
+}

@@ -1,5 +1,6 @@
 import { getDb } from './db';
 
+/** Registro completo de nota, incluidos adjuntos Base64 y tipo de archivo. */
 export interface NoteRow {
   id: number;
   folder_id: number | null;
@@ -11,6 +12,10 @@ export interface NoteRow {
   updated_at: string;
 }
 
+/**
+ * Lista notas visibles; `null` obtiene toda la biblioteca para transferencias,
+ * mientras que un identificador limita el resultado a una carpeta.
+ */
 export function getNotesByFolder(folderId: number | null): NoteRow[] {
   const db = getDb();
   const cols = 'id, folder_id, title, content, file_type, created_at, updated_at';
@@ -22,11 +27,13 @@ export function getNotesByFolder(folderId: number | null): NoteRow[] {
     .all(folderId) as NoteRow[];
 }
 
+/** Recupera una nota con sus datos binarios, incluso si fue borrada lógicamente. */
 export function getNoteById(id: number): NoteRow | undefined {
   const db = getDb();
   return db.prepare('SELECT * FROM notes WHERE id = ?').get(id) as NoteRow | undefined;
 }
 
+/** Inserta una nota vacía y devuelve la fila generada. */
 export function createNote(folderId: number | null, title?: string): NoteRow {
   const db = getDb();
   const stmt = db.prepare('INSERT INTO notes (folder_id, title, content) VALUES (?, ?, ?)');
@@ -34,6 +41,7 @@ export function createNote(folderId: number | null, title?: string): NoteRow {
   return db.prepare('SELECT * FROM notes WHERE id = ?').get(result.lastInsertRowid) as NoteRow;
 }
 
+/** Construye un UPDATE parcial sólo con los campos recibidos. */
 export function updateNote(id: number, data: { title?: string; content?: string; folder_id?: number | null }): NoteRow {
   const db = getDb();
   const fields: string[] = [];
@@ -69,6 +77,7 @@ export function updateNote(id: number, data: { title?: string; content?: string;
   return db.prepare('SELECT * FROM notes WHERE id = ?').get(id) as NoteRow;
 }
 
+/** Aplica borrado lógico sin destruir el contenido de la nota. */
 export function deleteNote(id: number): void {
   const db = getDb();
   db.prepare("UPDATE notes SET deleted_at = datetime('now') WHERE id = ?").run(id);

@@ -1,7 +1,10 @@
 const { execSync } = require('child_process');
 const path = require('path');
 
-// Generar timestamp para directorio único
+/**
+ * Pipeline secuencial de distribución para Windows: compila el proceso main,
+ * genera el renderer Angular y finalmente crea el instalador NSIS.
+ */
 const outputDir = `release`;
 
 console.log(`Building with output directory: ${outputDir}`);

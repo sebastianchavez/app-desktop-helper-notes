@@ -6,6 +6,7 @@ import { TranslateHttpLoader, provideTranslateHttpLoader } from '@ngx-translate/
 
 import { routes } from './app.routes';
 
+/** Providers globales del renderer: errores, router, HTTP e internacionalización. */
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),

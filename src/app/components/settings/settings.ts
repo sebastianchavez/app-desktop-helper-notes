@@ -9,6 +9,7 @@ import { I18nService, LANGUAGE_OPTIONS, AppLanguage } from '../../services/i18n.
   templateUrl: './settings.html',
   styleUrl: './settings.scss',
 })
+/** Presenta las preferencias de tema, color e idioma y delega su persistencia. */
 export class Settings {
   protected readonly themeService = inject(ThemeService);
   protected readonly i18nService = inject(I18nService);

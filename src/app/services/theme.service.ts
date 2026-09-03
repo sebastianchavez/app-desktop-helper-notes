@@ -21,6 +21,11 @@ export const COLOR_THEME_OPTIONS: ColorThemeOption[] = [
 ];
 
 @Injectable({ providedIn: 'root' })
+/**
+ * Gestiona el modo claro/oscuro y la paleta de acento.
+ * Las preferencias viven en la base local y se proyectan al elemento `<html>`
+ * mediante clases, atributos y variables CSS.
+ */
 export class ThemeService {
   private api = window.electronAPI;
 
@@ -28,6 +33,7 @@ export class ThemeService {
   readonly currentColorTheme = signal<ColorTheme>('blue');
   readonly customColor = signal('#135bec');
 
+  /** Recupera las preferencias persistidas y las aplica antes de mostrar la interfaz. */
   async init(): Promise<void> {
     const [savedTheme, savedColor, savedCustom] = await Promise.all([
       this.api.settingsGet('theme'),
@@ -46,18 +52,21 @@ export class ThemeService {
     this.applyColorTheme(colorTheme, customColorVal);
   }
 
+  /** Aplica y persiste el modo claro, oscuro o dependiente del sistema. */
   async setTheme(theme: Theme): Promise<void> {
     this.currentTheme.set(theme);
     this.applyTheme(theme);
     await this.api.settingsSet('theme', theme);
   }
 
+  /** Activa una paleta predefinida o la paleta personalizada actual. */
   async setColorTheme(colorTheme: ColorTheme): Promise<void> {
     this.currentColorTheme.set(colorTheme);
     this.applyColorTheme(colorTheme, this.customColor());
     await this.api.settingsSet('colorTheme', colorTheme);
   }
 
+  /** Guarda un color hexadecimal y lo aplica si la paleta personalizada está activa. */
   async setCustomColor(hex: string): Promise<void> {
     this.customColor.set(hex);
     if (this.currentColorTheme() === 'custom') {
@@ -99,6 +108,7 @@ export class ThemeService {
     }
   }
 
+  /** Convierte el color hexadecimal al formato RGB separado que consumen las variables CSS. */
   private hexToRgbValues(hex: string): string {
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
@@ -106,6 +116,7 @@ export class ThemeService {
     return `${r} ${g} ${b}`;
   }
 
+  /** Genera un fondo muy oscuro derivado del color de acento. */
   private darkenForBg(hex: string): string {
     const r = Math.round(parseInt(hex.slice(1, 3), 16) * 0.08);
     const g = Math.round(parseInt(hex.slice(3, 5), 16) * 0.08);
@@ -113,6 +124,7 @@ export class ThemeService {
     return `${Math.max(r, 12)} ${Math.max(g, 12)} ${Math.max(b, 18)}`;
   }
 
+  /** Genera una variante algo más luminosa para la barra lateral. */
   private darkenForSidebar(hex: string): string {
     const r = Math.round(parseInt(hex.slice(1, 3), 16) * 0.1);
     const g = Math.round(parseInt(hex.slice(3, 5), 16) * 0.1);

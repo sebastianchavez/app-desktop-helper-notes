@@ -22,6 +22,13 @@
     color: theme('colors.slate.700');
   }
 
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    background: transparent;
+    border-color: transparent;
+  }
+
   &.active {
     background: theme('colors.primary');
     color: #fff;
@@ -133,5 +140,1070 @@
     &::selection {
       background: theme('colors.primary / 20%');
     }
+  }
+}
+
+// ─── Excel spreadsheet — full Excel-like appearance ───
+
+// App container
+.xlsx-app {
+  background: #f0f0f0;
+  font-family: 'Segoe UI', 'Calibri', 'Inter', sans-serif;
+}
+
+// Ribbon bar (dark green like Excel)
+.xlsx-ribbon {
+  background: #217346;
+  border-bottom: 1px solid #1a5c37;
+  min-height: 32px;
+}
+
+// Formula bar
+.xlsx-formula-bar {
+  background: #ffffff;
+  border-bottom: 1px solid #d0d0d0;
+  height: 26px;
+  min-height: 26px;
+}
+
+.xlsx-name-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 0 8px;
+  height: 100%;
+  border-right: 1px solid #d0d0d0;
+  font-size: 11px;
+  font-family: 'Calibri', 'Segoe UI', sans-serif;
+  font-weight: 400;
+  color: #333;
+  background: #fff;
+  user-select: none;
+  cursor: default;
+}
+
+.xlsx-fx-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 100%;
+  border-right: 1px solid #d0d0d0;
+  font-size: 11px;
+  color: #666;
+  user-select: none;
+}
+
+.xlsx-formula-input {
+  width: 100%;
+  height: 100%;
+  padding: 0 6px;
+  border: none;
+  outline: none;
+  font-size: 12px;
+  font-family: 'Calibri', 'Segoe UI', sans-serif;
+  color: #333;
+  background: transparent;
+  user-select: text;
+  -webkit-user-select: text;
+
+  &:focus {
+    background: #fff;
+  }
+}
+
+// Grid container
+.xlsx-grid-container {
+  background: #e8e8e8;
+
+  &:focus {
+    outline: none;
+  }
+}
+
+// Grid table
+.xlsx-grid {
+  border-collapse: collapse;
+  font-family: 'Calibri', 'Segoe UI', sans-serif;
+  font-size: 12px;
+  table-layout: fixed;
+  border-spacing: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+// Corner cell (top-left)
+.xlsx-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 40px;
+  min-width: 40px;
+  height: 20px;
+  background: linear-gradient(180deg, #f8f8f8 0%, #e8e8e8 100%);
+  border-right: 1px solid #b0b0b0;
+  border-bottom: 1px solid #b0b0b0;
+}
+
+// Column headers (A, B, C...)
+.xlsx-col-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-width: 80px;
+  width: 80px;
+  height: 20px;
+  padding: 0;
+  background: linear-gradient(180deg, #f8f8f8 0%, #e8e8e8 100%);
+  border-right: 1px solid #c8c8c8;
+  border-bottom: 1px solid #b0b0b0;
+  text-align: center;
+  font-weight: 400;
+  font-size: 11px;
+  color: #333;
+  user-select: none;
+  line-height: 20px;
+
+  &.xlsx-col-active {
+    background: linear-gradient(180deg, #c8daf0 0%, #a0bce0 100%);
+    border-bottom-color: #4472c4;
+    color: #1a3a6a;
+    font-weight: 600;
+  }
+}
+
+// Row headers (1, 2, 3...)
+.xlsx-row-header {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 40px;
+  min-width: 40px;
+  height: 20px;
+  padding: 0 4px;
+  background: linear-gradient(90deg, #f8f8f8 0%, #e8e8e8 100%);
+  border-right: 1px solid #b0b0b0;
+  border-bottom: 1px solid #c8c8c8;
+  text-align: center;
+  font-weight: 400;
+  font-size: 11px;
+  color: #333;
+  user-select: none;
+  line-height: 20px;
+
+  &.xlsx-row-active {
+    background: linear-gradient(90deg, #c8daf0 0%, #a0bce0 100%);
+    border-right-color: #4472c4;
+    color: #1a3a6a;
+    font-weight: 600;
+  }
+}
+
+.xlsx-col-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  z-index: 5;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.xlsx-row-resizer {
+  position: absolute;
+  right: 0;
+  bottom: -3px;
+  z-index: 5;
+  width: 100%;
+  height: 7px;
+  cursor: row-resize;
+}
+
+// Cells
+.xlsx-cell {
+  min-width: 80px;
+  width: 80px;
+  height: 20px;
+  max-height: 20px;
+  padding: 0 3px;
+  border-right: 1px solid #d4d4d4;
+  border-bottom: 1px solid #d4d4d4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: cell;
+  position: relative;
+  color: #000;
+  background: #fff;
+  font-size: 12px;
+  line-height: 20px;
+
+  &:hover:not(.xlsx-cell-selected) {
+    // Subtle hover — no background change like real Excel
+  }
+
+  &.xlsx-cell-selected {
+    outline: 2px solid #4472c4;
+    outline-offset: -1px;
+    z-index: 1;
+  }
+
+  &.xlsx-cell-numeric {
+    text-align: right;
+  }
+
+  &.xlsx-cell-formula::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 0;
+    height: 0;
+    border-top: 5px solid #2e7d32;
+    border-left: 5px solid transparent;
+    pointer-events: none;
+  }
+}
+
+.xlsx-formula-editor {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+.xlsx-formula-suggestions {
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 0;
+  z-index: 20;
+  width: min(440px, 80vw);
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #b7c2cf;
+  border-radius: 0 0 6px 6px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 22%);
+}
+
+.xlsx-formula-suggestion {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 90px 1fr;
+  gap: 2px 10px;
+  padding: 7px 10px;
+  color: #1f2937;
+  text-align: left;
+
+  strong { color: #166534; }
+  span { font-family: Consolas, monospace; font-size: 11px; }
+  small { grid-column: 2; color: #64748b; }
+
+  &:hover,
+  &.active {
+    background: #dcfce7;
+  }
+}
+
+// ── Presentation editor ──
+.ppt-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #f1f5f9;
+}
+
+.ppt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 46px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.ppt-title-input {
+  flex: 1;
+  min-width: 80px;
+  border: 0;
+  outline: 0;
+  padding: 5px 7px;
+  border-radius: 5px;
+  color: #1e293b;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+
+  &:focus { box-shadow: 0 0 0 1px #fb923c; }
+}
+
+.ppt-toolbar-btn,
+.ppt-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  color: #475569;
+  background: transparent;
+  cursor: pointer;
+
+  .material-symbols-outlined { font-size: 17px; }
+  &:hover:not(:disabled) { color: #9a3412; background: #ffedd5; }
+  &:disabled { opacity: 0.35; cursor: default; }
+}
+
+.ppt-toolbar-btn { width: 30px; }
+.ppt-toolbar-btn.ppt-danger:hover { color: #b91c1c; background: #fee2e2; }
+.ppt-action-btn { padding: 0 10px; font-size: 11px; font-weight: 600; background: #f1f5f9; }
+.ppt-present-btn { color: #fff; background: #ea580c; }
+.ppt-present-btn:hover:not(:disabled) { color: #fff; background: #f97316; }
+.ppt-toolbar-separator { width: 1px; height: 23px; margin: 0 3px; background: #e2e8f0; }
+
+.ppt-ribbon-shell { flex-shrink: 0; border-bottom: 1px solid #cbd5e1; background: #fff; }
+.ppt-topbar { display: flex; align-items: center; gap: 6px; min-height: 38px; padding: 4px 10px; }
+.ppt-ribbon-tabs { display: flex; gap: 2px; min-height: 28px; padding: 0 10px; border-top: 1px solid #f1f5f9; }
+.ppt-ribbon-tabs button { padding: 4px 12px; border: 0; border-bottom: 2px solid transparent; color: #475569; background: transparent; font-size: 11px; cursor: pointer; }
+.ppt-ribbon-tabs button:hover { color: #c2410c; background: #fff7ed; }
+.ppt-ribbon-tabs button.active { border-bottom-color: #ea580c; color: #9a3412; font-weight: 700; }
+.ppt-ribbon { display: flex; min-height: 72px; overflow-x: auto; border-top: 1px solid #e2e8f0; }
+.ppt-ribbon-group { position: relative; display: flex; align-items: center; gap: 4px; min-width: max-content; padding: 5px 10px 17px; border-right: 1px solid #e2e8f0; }
+.ppt-ribbon-group-label { position: absolute; right: 6px; bottom: 2px; left: 6px; overflow: hidden; color: #94a3b8; font-size: 9px; text-align: center; white-space: nowrap; }
+.ppt-ribbon-command { display: flex; min-width: 46px; height: 47px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 3px 6px; border: 1px solid transparent; border-radius: 4px; color: #475569; background: transparent; cursor: pointer; }
+.ppt-ribbon-command:hover:not(:disabled), .ppt-ribbon-command.primary { border-color: #fed7aa; color: #9a3412; background: #fff7ed; }
+.ppt-ribbon-command.selected { border-color: #fb923c; color: #9a3412; background: #ffedd5; box-shadow: inset 0 0 0 1px #fdba74; }
+.ppt-ribbon-command.danger:hover { color: #b91c1c; background: #fee2e2; }
+.ppt-ribbon-command:disabled { opacity: .35; cursor: default; }
+.ppt-ribbon-command .material-symbols-outlined { font-size: 20px; }
+.ppt-ribbon-command small { font-size: 9px; white-space: nowrap; }
+.ppt-format-group { display: grid; grid-template-columns: 110px 58px repeat(6, 27px); align-content: center; }
+.ppt-ribbon-select { height: 25px; min-width: 100px; border: 1px solid #cbd5e1; border-radius: 4px; color: #334155; background: #fff; font-size: 10px; }
+.ppt-ribbon-select.compact { min-width: 54px; }
+.ppt-mini-command { display: flex; width: 25px; height: 25px; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 3px; color: #475569; background: transparent; cursor: pointer; }
+.ppt-mini-command:hover, .ppt-mini-command.active { border-color: #fdba74; color: #9a3412; background: #ffedd5; }
+.ppt-mini-command .material-symbols-outlined { font-size: 16px; }
+.ppt-layout-group label { display: flex; flex-direction: column; gap: 3px; color: #64748b; font-size: 9px; }
+.ppt-theme-group { gap: 8px; }
+.ppt-theme-swatch { display: flex; width: 74px; height: 45px; flex-direction: column; justify-content: space-between; padding: 4px; border: 2px solid; border-radius: 4px; color: #475569; cursor: pointer; }
+.ppt-theme-swatch span { width: 75%; height: 6px; border-radius: 2px; }
+.ppt-theme-swatch small { overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.ppt-effects-group { min-width: 330px; }
+.ppt-timing-group { align-items: flex-start; flex-direction: column; justify-content: center; padding-right: 14px; }
+.ppt-timing-group label { display: flex; align-items: center; gap: 4px; color: #64748b; font-size: 9px; }
+.ppt-timing-group input { width: 55px; height: 22px; padding: 0 4px; border: 1px solid #cbd5e1; border-radius: 3px; color: #334155; background: #fff; font-size: 10px; }
+
+.ppt-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.ppt-slide-list {
+  width: 210px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 12px 9px;
+  border-right: 1px solid #cbd5e1;
+  background: #e2e8f0;
+}
+
+.ppt-thumbnail-row {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 5px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 0;
+  border: 0;
+  color: #475569;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ppt-thumbnail-number { padding-top: 4px; font-size: 10px; text-align: center; }
+.ppt-thumbnail-canvas {
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  padding: 10px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.13);
+}
+.ppt-thumbnail-canvas strong { overflow: hidden; color: #9a3412; font-size: 8px; white-space: nowrap; text-overflow: ellipsis; }
+.ppt-thumbnail-canvas small { display: -webkit-box; overflow: hidden; margin-top: 5px; color: #64748b; font-size: 6px; white-space: pre-line; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
+.ppt-thumbnail-active .ppt-thumbnail-canvas { border-color: #f97316; box-shadow: 0 0 0 1px #fdba74; }
+.ppt-thumbnail-active .ppt-thumbnail-number { color: #c2410c; font-weight: 700; }
+
+.ppt-add-thumbnail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: calc(100% - 27px);
+  margin-left: 27px;
+  padding: 7px;
+  border: 1px dashed #94a3b8;
+  border-radius: 5px;
+  color: #64748b;
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+  &:hover { color: #c2410c; border-color: #fb923c; background: #fff7ed; }
+  .material-symbols-outlined { font-size: 15px; }
+}
+
+.ppt-editor-area {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  overflow: auto;
+  padding: 26px;
+}
+
+.ppt-slide-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 960px);
+  aspect-ratio: 16 / 9;
+  min-height: 300px;
+  padding: 7% 7% 6%;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
+}
+.ppt-slide-stage.ppt-layout-section { justify-content: center; }
+.ppt-slide-stage.ppt-layout-section .ppt-slide-title { min-height: 90px; }
+.ppt-slide-stage.ppt-layout-title-only { justify-content: center; }
+
+.ppt-slide-title,
+.ppt-slide-body {
+  width: 100%;
+  border: 1px solid transparent;
+  outline: 0;
+  color: #334155;
+  background: transparent;
+  resize: none;
+  &:focus { border-color: #fdba74; background: #fffaf5; }
+}
+.ppt-slide-title { min-height: 60px; padding: 7px 10px; color: #9a3412; font-size: clamp(25px, 3.2vw, 42px); font-weight: 700; }
+.ppt-slide-body { flex: 1; min-height: 150px; margin-top: 16px; padding: 10px; font: 400 clamp(16px, 1.8vw, 24px)/1.45 Aptos, 'Segoe UI', sans-serif; }
+.ppt-slide-counter { position: absolute; right: 24px; bottom: 16px; color: #94a3b8; font-size: 10px; }
+
+.ppt-notes-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 960px);
+  margin-top: 18px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  textarea { min-height: 70px; margin-top: 5px; padding: 9px; border: 1px solid #cbd5e1; border-radius: 6px; outline: 0; color: #334155; background: #fff; font-size: 12px; font-weight: 400; resize: vertical; }
+  textarea:focus { border-color: #fb923c; }
+}
+
+.ppt-presenter {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #020617;
+}
+.ppt-presented-slide {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: min(92vw, calc(92vh * 16 / 9));
+  aspect-ratio: 16 / 9;
+  padding: 7%;
+  color: #334155;
+  background: #fff;
+  h1 { margin: 0 0 4%; color: #9a3412; font-size: clamp(32px, 5vw, 72px); line-height: 1.1; }
+  > span { position: absolute; right: 3%; bottom: 2.5%; color: #94a3b8; font-size: 13px; }
+}
+.ppt-presented-body { max-height: 64%; overflow: hidden; font-size: clamp(18px, 2.5vw, 38px); line-height: 1.45; white-space: pre-line; }
+.ppt-presented-slide.ppt-layout-section { text-align: center; }
+
+.ppt-transition-fade { animation-name: ppt-transition-fade; animation-timing-function: ease-out; animation-fill-mode: both; }
+.ppt-transition-push { animation-name: ppt-transition-push; animation-timing-function: cubic-bezier(.2,.8,.2,1); animation-fill-mode: both; }
+.ppt-transition-zoom { animation-name: ppt-transition-zoom; animation-timing-function: ease-out; animation-fill-mode: both; }
+.ppt-transition-wipe { animation-name: ppt-transition-wipe; animation-timing-function: ease-in-out; animation-fill-mode: both; }
+.ppt-animation-appear { animation-name: ppt-animation-appear; animation-timing-function: steps(1, end); animation-fill-mode: both; }
+.ppt-animation-fade { animation-name: ppt-animation-fade; animation-timing-function: ease-out; animation-fill-mode: both; }
+.ppt-animation-float { animation-name: ppt-animation-float; animation-timing-function: cubic-bezier(.2,.8,.2,1); animation-fill-mode: both; }
+.ppt-animation-zoom { animation-name: ppt-animation-zoom; animation-timing-function: ease-out; animation-fill-mode: both; }
+
+@keyframes ppt-transition-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ppt-transition-push { from { opacity: .35; transform: translateX(18%); } to { opacity: 1; transform: translateX(0); } }
+@keyframes ppt-transition-zoom { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: scale(1); } }
+@keyframes ppt-transition-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes ppt-animation-appear { from { visibility: hidden; } to { visibility: visible; } }
+@keyframes ppt-animation-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ppt-animation-float { from { opacity: 0; transform: translateY(34px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes ppt-animation-zoom { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+.ppt-presenter-close,
+.ppt-presenter-nav { position: fixed; z-index: 2; border: 0; color: #fff; background: rgba(255, 255, 255, 0.1); cursor: pointer; }
+.ppt-presenter-close { top: 18px; right: 18px; width: 42px; height: 42px; border-radius: 50%; }
+.ppt-presenter-nav { top: 50%; width: 48px; height: 64px; border-radius: 8px; transform: translateY(-50%); }
+.ppt-presenter-nav:disabled { opacity: 0.15; cursor: default; }
+.ppt-presenter-prev { left: 16px; }
+.ppt-presenter-next { right: 16px; }
+
+:host-context(.dark) {
+  .ppt-app { background: #0f172a; }
+  .ppt-toolbar { border-bottom-color: #334155; background: #111827; }
+  .ppt-ribbon-shell, .ppt-topbar { border-color: #334155; background: #111827; }
+  .ppt-ribbon-tabs, .ppt-ribbon { border-color: #334155; }
+  .ppt-ribbon-tabs button { color: #cbd5e1; }
+  .ppt-ribbon-tabs button:hover, .ppt-ribbon-tabs button.active { color: #fdba74; background: #292524; }
+  .ppt-ribbon-group { border-color: #334155; }
+  .ppt-ribbon-command, .ppt-mini-command { color: #cbd5e1; }
+  .ppt-ribbon-command:hover:not(:disabled), .ppt-ribbon-command.primary, .ppt-mini-command:hover, .ppt-mini-command.active { color: #fdba74; background: #431407; }
+  .ppt-ribbon-select { color: #e2e8f0; border-color: #475569; background: #1e293b; }
+  .ppt-timing-group input { color: #e2e8f0; border-color: #475569; background: #1e293b; }
+  .ppt-title-input { color: #e2e8f0; }
+  .ppt-toolbar-btn { color: #94a3b8; }
+  .ppt-action-btn:not(.ppt-present-btn) { color: #cbd5e1; background: #334155; }
+  .ppt-toolbar-separator { background: #334155; }
+  .ppt-slide-list { border-right-color: #334155; background: #1e293b; }
+  .ppt-thumbnail-number { color: #94a3b8; }
+  .ppt-editor-area { background: #0f172a; }
+  .ppt-notes-panel { color: #94a3b8; }
+  .ppt-notes-panel textarea { color: #e2e8f0; border-color: #475569; background: #1e293b; }
+}
+
+@media (max-width: 780px) {
+  .ppt-slide-list { width: 145px; }
+  .ppt-editor-area { padding: 14px; }
+  .ppt-action-btn { padding: 0 7px; }
+  .ppt-action-btn:not(.ppt-present-btn) { font-size: 0; }
+}
+
+.xlsx-export-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: #fff;
+  background: #16a34a;
+
+  &:hover {
+    background: #22c55e;
+  }
+
+  select {
+    max-width: 145px;
+    border: 0;
+    outline: 0;
+    color: inherit;
+    background: transparent;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  option {
+    color: #111827;
+    background: #fff;
+  }
+}
+
+.xlsx-cell-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 20px;
+}
+
+.xlsx-cell-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0 3px;
+  border: 2px solid #4472c4;
+  background: white;
+  font-family: 'Calibri', 'Segoe UI', sans-serif;
+  font-size: 12px;
+  color: #000;
+  outline: none;
+  z-index: 2;
+  line-height: 16px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+// ── Excel toolbar ──
+
+.xlsx-toolbar {
+  background: #e8e8e8;
+  border-bottom: 1px solid #d0d0d0;
+  min-height: 30px;
+  gap: 2px;
+}
+
+.xlsx-tb-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #444;
+  cursor: pointer;
+  transition: all 0.1s;
+
+  &:hover {
+    background: #d4d4d4;
+    border-color: #b0b0b0;
+  }
+
+  &.xlsx-tb-active {
+    background: #c0d8f0;
+    border-color: #4472c4;
+    color: #1a3a6a;
+  }
+}
+
+.xlsx-tb-select {
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid #c0c0c0;
+  border-radius: 3px;
+  background: #fff;
+  font-size: 11px;
+  font-family: 'Calibri', 'Segoe UI', sans-serif;
+  color: #333;
+  cursor: pointer;
+  outline: none;
+
+  &:focus {
+    border-color: #4472c4;
+  }
+}
+
+.xlsx-tb-sep {
+  width: 1px;
+  height: 18px;
+  background: #c0c0c0;
+  margin: 0 3px;
+}
+
+// ── Range selection ──
+
+.xlsx-cell.xlsx-cell-in-range {
+  background: #cce0f5 !important;
+}
+
+.xlsx-col-header.xlsx-col-in-range {
+  background: linear-gradient(180deg, #d8e8f8 0%, #b0c8e0 100%);
+  color: #1a3a6a;
+}
+
+.xlsx-row-header.xlsx-row-in-range {
+  background: linear-gradient(90deg, #d8e8f8 0%, #b0c8e0 100%);
+  color: #1a3a6a;
+}
+
+.xlsx-corner {
+  cursor: pointer;
+
+  &:hover {
+    background: linear-gradient(180deg, #d8e8f8 0%, #b8c8d8 100%);
+  }
+}
+
+.xlsx-col-header,
+.xlsx-row-header {
+  cursor: pointer;
+
+  &:hover:not(.xlsx-col-active):not(.xlsx-row-active) {
+    background: linear-gradient(180deg, #e8e8e8 0%, #d8d8d8 100%);
+  }
+}
+
+// ── Context menu ──
+
+.xlsx-context-menu {
+  position: fixed;
+  z-index: 100;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 200px;
+  font-family: 'Segoe UI', 'Calibri', sans-serif;
+  font-size: 12px;
+}
+
+.xlsx-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: #333;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  transition: background 0.1s;
+
+  &:hover {
+    background: #e8f0fe;
+  }
+
+  &.xlsx-ctx-danger {
+    color: #c42b1c;
+
+    &:hover {
+      background: #fde8e8;
+    }
+  }
+}
+
+.xlsx-ctx-shortcut {
+  margin-left: auto;
+  color: #999;
+  font-size: 11px;
+}
+
+.xlsx-ctx-sep {
+  height: 1px;
+  background: #e0e0e0;
+  margin: 4px 0;
+}
+
+// Status bar & sheet tabs
+.xlsx-status-bar {
+  background: #217346;
+  min-height: 24px;
+  border-top: 1px solid #1a5c37;
+}
+
+.xlsx-sheet-tabs {
+  display: flex;
+  align-items: stretch;
+  min-height: 24px;
+}
+
+.xlsx-sheet-nav {
+  display: flex;
+  align-items: center;
+  border-right: 1px solid #1a5c37;
+}
+
+.xlsx-sheet-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: color 0.1s;
+
+  &:hover {
+    color: #fff;
+  }
+}
+
+.xlsx-sheet-tab {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  height: 24px;
+  font-size: 11px;
+  font-family: 'Segoe UI', 'Calibri', sans-serif;
+  font-weight: 400;
+  background: #1a5c37;
+  color: rgba(255, 255, 255, 0.8);
+  border: none;
+  border-right: 1px solid #145a30;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.1s;
+
+  &:hover:not(.xlsx-sheet-tab-active) {
+    background: #1e6940;
+    color: #fff;
+  }
+
+  &.xlsx-sheet-tab-active {
+    background: #fff;
+    color: #217346;
+    font-weight: 600;
+    border-bottom: none;
+  }
+}
+
+.xlsx-status-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+
+  .xlsx-status-item {
+    padding: 2px 8px;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+}
+
+// ─── Dark mode overrides for Excel viewer ───
+:host-context(.dark) {
+  .xlsx-app {
+    background: #1e1e1e;
+  }
+
+  .xlsx-ribbon {
+    background: #1e3a28;
+    border-bottom-color: #163020;
+  }
+
+  .xlsx-formula-bar {
+    background: #2d2d2d;
+    border-bottom-color: #3e3e3e;
+  }
+
+  .xlsx-name-box {
+    background: #2d2d2d;
+    border-right-color: #3e3e3e;
+    color: #d0d0d0;
+  }
+
+  .xlsx-fx-label {
+    border-right-color: #3e3e3e;
+    color: #808080;
+  }
+
+  .xlsx-formula-input {
+    color: #d0d0d0;
+
+    &:focus {
+      background: #2d2d2d;
+    }
+  }
+
+  .xlsx-formula-suggestions {
+    border-color: #4b5563;
+    background: #252525;
+  }
+
+  .xlsx-formula-suggestion {
+    color: #e5e7eb;
+
+    strong { color: #4ade80; }
+    small { color: #94a3b8; }
+
+    &:hover,
+    &.active {
+      background: #163a27;
+    }
+  }
+
+  .xlsx-grid-container {
+    background: #1e1e1e;
+  }
+
+  .xlsx-corner {
+    background: linear-gradient(180deg, #3a3a3a 0%, #2d2d2d 100%);
+    border-right-color: #555;
+    border-bottom-color: #555;
+  }
+
+  .xlsx-col-header {
+    background: linear-gradient(180deg, #3a3a3a 0%, #2d2d2d 100%);
+    border-right-color: #444;
+    border-bottom-color: #555;
+    color: #c0c0c0;
+
+    &.xlsx-col-active {
+      background: linear-gradient(180deg, #2a3a50 0%, #1e304a 100%);
+      border-bottom-color: #5b9bd5;
+      color: #8eb8e5;
+    }
+  }
+
+  .xlsx-row-header {
+    background: linear-gradient(90deg, #3a3a3a 0%, #2d2d2d 100%);
+    border-right-color: #555;
+    border-bottom-color: #444;
+    color: #c0c0c0;
+
+    &.xlsx-row-active {
+      background: linear-gradient(90deg, #2a3a50 0%, #1e304a 100%);
+      border-right-color: #5b9bd5;
+      color: #8eb8e5;
+    }
+  }
+
+  .xlsx-cell {
+    border-right-color: #3a3a3a;
+    border-bottom-color: #3a3a3a;
+    color: #d0d0d0;
+    background: #1e1e1e;
+
+    &.xlsx-cell-selected {
+      outline-color: #5b9bd5;
+    }
+  }
+
+  .xlsx-cell-input {
+    background: #1e1e1e;
+    color: #d0d0d0;
+    border-color: #5b9bd5;
+  }
+
+  // ── Dark mode: toolbar ──
+  .xlsx-toolbar {
+    background: #2d2d2d;
+    border-bottom-color: #3e3e3e;
+  }
+
+  .xlsx-tb-btn {
+    color: #c0c0c0;
+
+    &:hover {
+      background: #3a3a3a;
+      border-color: #555;
+    }
+
+    &.xlsx-tb-active {
+      background: #1e304a;
+      border-color: #5b9bd5;
+      color: #8eb8e5;
+    }
+  }
+
+  .xlsx-tb-select {
+    background: #2d2d2d;
+    border-color: #555;
+    color: #d0d0d0;
+
+    &:focus {
+      border-color: #5b9bd5;
+    }
+  }
+
+  .xlsx-tb-sep {
+    background: #555;
+  }
+
+  // ── Dark mode: range selection ──
+  .xlsx-cell.xlsx-cell-in-range {
+    background: #1e304a !important;
+  }
+
+  .xlsx-col-header.xlsx-col-in-range {
+    background: linear-gradient(180deg, #2a3a50 0%, #1e304a 100%);
+    color: #8eb8e5;
+  }
+
+  .xlsx-row-header.xlsx-row-in-range {
+    background: linear-gradient(90deg, #2a3a50 0%, #1e304a 100%);
+    color: #8eb8e5;
+  }
+
+  .xlsx-corner:hover {
+    background: linear-gradient(180deg, #3a3a3a 0%, #2d2d2d 100%);
+  }
+
+  // ── Dark mode: context menu ──
+  .xlsx-context-menu {
+    background: #2d2d2d;
+    border-color: #555;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+
+  .xlsx-ctx-item {
+    color: #d0d0d0;
+
+    &:hover {
+      background: #3a4a5a;
+    }
+
+    &.xlsx-ctx-danger {
+      color: #f08080;
+
+      &:hover {
+        background: #3a2020;
+      }
+    }
+  }
+
+  .xlsx-ctx-shortcut {
+    color: #777;
+  }
+
+  .xlsx-ctx-sep {
+    background: #444;
+  }
+
+  .xlsx-status-bar {
+    background: #1e3a28;
+    border-top-color: #163020;
+  }
+
+  .xlsx-sheet-nav {
+    border-right-color: #163020;
+  }
+
+  .xlsx-sheet-nav-btn {
+    color: rgba(255, 255, 255, 0.5);
+
+    &:hover {
+      color: rgba(255, 255, 255, 0.9);
+    }
+  }
+
+  .xlsx-sheet-tab {
+    background: #163020;
+    color: rgba(255, 255, 255, 0.6);
+    border-right-color: #0e2518;
+
+    &:hover:not(.xlsx-sheet-tab-active) {
+      background: #1e3a28;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    &.xlsx-sheet-tab-active {
+      background: #1e1e1e;
+      color: #5bc084;
+    }
+  }
+
+  .xlsx-status-info {
+    color: rgba(255, 255, 255, 0.5);
   }
 }

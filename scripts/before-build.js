@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
+/** Elimina un archivo tolerando bloqueos y atributos de sólo lectura de Windows. */
 function deleteFileSync(filePath) {
   try {
     if (fs.existsSync(filePath)) {
@@ -20,6 +21,7 @@ function deleteFileSync(filePath) {
   }
 }
 
+/** Retira un directorio de salida anterior sin convertir la ausencia en error. */
 function deleteFolderRecursive(folderPath) {
   if (fs.existsSync(folderPath)) {
     try {
@@ -31,7 +33,7 @@ function deleteFolderRecursive(folderPath) {
   }
 }
 
-// Cleanup before build
+// Prepara una salida limpia; en Windows primero libera archivos usados por Electron.
 console.log('Running pre-build cleanup...');
 
 const projectRoot = process.cwd();

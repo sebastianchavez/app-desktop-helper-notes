@@ -31,12 +31,17 @@ const LANGUAGE_NAMES: Record<AppLanguage, string> = {
 };
 
 @Injectable({ providedIn: 'root' })
+/**
+ * Inicializa ngx-translate y persiste el idioma seleccionado en SQLite a
+ * través del puente seguro de Electron.
+ */
 export class I18nService {
   private readonly translate = inject(TranslateService);
   private api = window.electronAPI;
 
   readonly currentLang = signal<AppLanguage>('es');
 
+  /** Registra idiomas, recupera la preferencia guardada y activa el catálogo correspondiente. */
   async init(): Promise<void> {
     this.translate.addLangs(['es', 'en', 'zh', 'de', 'fr', 'ja', 'pt']);
     this.translate.setDefaultLang('es');
@@ -47,6 +52,7 @@ export class I18nService {
     this.translate.use(lang);
   }
 
+  /** Cambia el idioma de inmediato y persiste la elección para futuros arranques. */
   async setLanguage(lang: AppLanguage): Promise<void> {
     this.currentLang.set(lang);
     this.translate.use(lang);

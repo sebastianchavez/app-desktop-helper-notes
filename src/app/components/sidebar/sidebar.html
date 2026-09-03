@@ -24,6 +24,7 @@
           <!-- All notes -->
           <a
             (click)="selectFolder(null)"
+            (contextmenu)="openContextMenu($event, null)"
             (dragover)="onDragOver($event, null)"
             (dragleave)="onDragLeave()"
             (drop)="onDrop($event, null)"
@@ -37,51 +38,77 @@
             <span class="text-sm font-medium">{{ 'SIDEBAR.ALL_NOTES' | translate }}</span>
           </a>
 
-          <!-- Dynamic folders -->
-          @for (folder of noteService.folders(); track folder.id) {
-            @if (editingFolderId() === folder.id) {
-              <div class="flex items-center gap-2 px-3 py-2">
-                <input
-                  class="flex-1 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary"
-                  [value]="editingFolderName()"
-                  (input)="editingFolderName.set($any($event.target).value)"
-                  (keydown.enter)="confirmEdit(folder.id)"
-                  (keydown.escape)="cancelEdit()"
-                  autofocus
-                />
-                <button (click)="confirmEdit(folder.id)" class="text-green-500 hover:text-green-400">
-                  <span class="material-symbols-outlined text-lg">check</span>
-                </button>
-                <button (click)="cancelEdit()" class="text-slate-400 hover:text-slate-300">
-                  <span class="material-symbols-outlined text-lg">close</span>
-                </button>
-              </div>
-            } @else {
-              <a
-                (click)="selectFolder(folder.id)"
-                (dblclick)="startEditing(folder.id, folder.name)"
-                (dragover)="onDragOver($event, folder.id)"
-                (dragleave)="onDragLeave()"
-                (drop)="onDrop($event, folder.id)"
-                [class]="(dragOverFolderId() === folder.id
-                  ? 'flex items-center gap-3 px-3 py-2 rounded-lg ring-2 ring-primary bg-primary/20 text-primary cursor-pointer group'
-                  : noteService.selectedFolderId() === folder.id
-                    ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer group'
-                    : 'flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer group')"
-              >
-                <span class="material-symbols-outlined text-lg">folder</span>
-                <span class="text-sm font-medium flex-1 truncate">{{ folder.name }}</span>
-                <button
-                  (click)="startEditingFromButton(folder.id, folder.name, $event)"
-                  class="material-symbols-outlined text-sm opacity-0 group-hover:opacity-100 text-slate-400 hover:text-primary transition-all"
-                >edit</button>
-                <button
-                  (click)="deleteFolder(folder.id, $event)"
-                  class="material-symbols-outlined text-sm opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-400 transition-all"
-                >delete</button>
-              </a>
+          <!-- Recursive folder tree -->
+          <ng-template #folderTree let-folders let-depth="depth">
+            @for (folder of folders; track folder.id) {
+              @if (editingFolderId() === folder.id) {
+                <div class="flex items-center gap-2 py-2" [style.padding-left.px]="12 + depth * 18">
+                  <input
+                    class="min-w-0 flex-1 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary"
+                    [value]="editingFolderName()"
+                    (input)="editingFolderName.set($any($event.target).value)"
+                    (keydown.enter)="confirmEdit(folder.id)"
+                    (keydown.escape)="cancelEdit()"
+                    autofocus
+                  />
+                  <button (click)="confirmEdit(folder.id)" class="text-green-500 hover:text-green-400"><span class="material-symbols-outlined text-lg">check</span></button>
+                  <button (click)="cancelEdit()" class="text-slate-400 hover:text-slate-300"><span class="material-symbols-outlined text-lg">close</span></button>
+                </div>
+              } @else {
+                <a
+                  (click)="selectFolder(folder.id)"
+                  (dblclick)="startEditing(folder.id, folder.name)"
+                  (contextmenu)="openContextMenu($event, folder.id)"
+                  (dragover)="onDragOver($event, folder.id)"
+                  (dragleave)="onDragLeave()"
+                  (drop)="onDrop($event, folder.id)"
+                  [style.padding-left.px]="8 + depth * 18"
+                  [class]="(dragOverFolderId() === folder.id
+                    ? 'flex items-center gap-1 px-2 py-2 rounded-lg ring-2 ring-primary bg-primary/20 text-primary cursor-pointer group'
+                    : noteService.selectedFolderId() === folder.id
+                      ? 'flex items-center gap-1 px-2 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer group'
+                      : 'flex items-center gap-1 px-2 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer group')"
+                >
+                  @if (hasChildren(folder.id)) {
+                    <button
+                      type="button"
+                      (click)="toggleExpanded(folder.id, $event)"
+                      class="material-symbols-outlined text-base w-5 flex-shrink-0 text-slate-400 hover:text-primary"
+                      [attr.aria-label]="isExpanded(folder.id) ? 'Contraer carpeta' : 'Expandir carpeta'"
+                    >{{ isExpanded(folder.id) ? 'expand_more' : 'chevron_right' }}</button>
+                  } @else {
+                    <span class="w-5 flex-shrink-0"></span>
+                  }
+                  <span class="material-symbols-outlined text-lg flex-shrink-0">{{ isExpanded(folder.id) && hasChildren(folder.id) ? 'folder_open' : 'folder' }}</span>
+                  <span class="text-sm font-medium flex-1 truncate">{{ folder.name }}</span>
+                  <button (click)="startEditingFromButton(folder.id, folder.name, $event)" class="material-symbols-outlined text-sm opacity-0 group-hover:opacity-100 text-slate-400 hover:text-primary transition-all">edit</button>
+                  <button (click)="deleteFolder(folder.id, $event)" class="material-symbols-outlined text-sm opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-400 transition-all">delete</button>
+                </a>
+              }
+
+              @if (showNewFolderInput() && newFolderParentId() === folder.id) {
+                <div class="flex items-center gap-2 py-1" [style.padding-left.px]="30 + (depth + 1) * 18">
+                  <span class="material-symbols-outlined text-base text-primary">create_new_folder</span>
+                  <input
+                    class="min-w-0 flex-1 text-sm bg-white dark:bg-slate-800 border border-primary rounded px-2 py-1 focus:outline-none"
+                    [placeholder]="'SIDEBAR.FOLDER_NAME_PLACEHOLDER' | translate"
+                    [value]="newFolderName()"
+                    (input)="newFolderName.set($any($event.target).value)"
+                    (keydown.enter)="confirmNewFolder()"
+                    (keydown.escape)="cancelNewFolder()"
+                    autofocus
+                  />
+                  <button (click)="confirmNewFolder()" class="text-green-500"><span class="material-symbols-outlined text-lg">check</span></button>
+                  <button (click)="cancelNewFolder()" class="text-slate-400"><span class="material-symbols-outlined text-lg">close</span></button>
+                </div>
+              }
+
+              @if (isExpanded(folder.id)) {
+                <ng-container [ngTemplateOutlet]="folderTree" [ngTemplateOutletContext]="{ $implicit: folderChildren(folder.id), depth: depth + 1 }"></ng-container>
+              }
             }
-          }
+          </ng-template>
+          <ng-container [ngTemplateOutlet]="folderTree" [ngTemplateOutletContext]="{ $implicit: rootFolders(), depth: 0 }"></ng-container>
         </nav>
       </div>
     </div>
@@ -124,7 +151,7 @@
     <!-- Bottom -->
     <div class="mt-auto pt-6 border-t border-slate-200 dark:border-slate-800">
       @if (!collapsed()) {
-        @if (showNewFolderInput()) {
+        @if (showNewFolderInput() && newFolderParentId() === null) {
           <div class="flex items-center gap-2 mb-4">
             <input
               class="flex-1 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary"
@@ -144,13 +171,31 @@
           </div>
         } @else {
           <button
-            (click)="showNewFolder()"
+            (click)="showNewFolder(null)"
             class="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white rounded-lg py-2.5 transition-all shadow-lg shadow-primary/20 mb-4"
           >
             <span class="material-symbols-outlined text-xl">add</span>
             <span class="text-sm font-bold">{{ 'SIDEBAR.NEW_FOLDER' | translate }}</span>
           </button>
         }
+        <div
+          (click)="goToDataTransfer()"
+          [class]="navService.currentView() === 'data-transfer'
+            ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer mb-1'
+            : 'flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer transition-colors mb-1'"
+        >
+          <span class="material-symbols-outlined text-lg">import_export</span>
+          <span class="text-sm font-medium">Importar y exportar</span>
+        </div>
+        <div
+          (click)="goToAssistantSettings()"
+          [class]="navService.currentView() === 'assistant-settings'
+            ? 'flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary cursor-pointer mb-1'
+            : 'flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer transition-colors mb-1'"
+        >
+          <span class="material-symbols-outlined text-lg">smart_toy</span>
+          <span class="text-sm font-medium">Asistentes</span>
+        </div>
         <div
           (click)="goToSettings()"
           [class]="navService.currentView() === 'settings'
@@ -171,6 +216,24 @@
             <span class="material-symbols-outlined text-lg">add</span>
           </button>
           <button
+            (click)="goToDataTransfer()"
+            [class]="navService.currentView() === 'data-transfer'
+              ? 'p-2 rounded-lg bg-primary/10 text-primary'
+              : 'p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors'"
+            title="Importar y exportar"
+          >
+            <span class="material-symbols-outlined text-lg">import_export</span>
+          </button>
+          <button
+            (click)="goToAssistantSettings()"
+            [class]="navService.currentView() === 'assistant-settings'
+              ? 'p-2 rounded-lg bg-primary/10 text-primary'
+              : 'p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors'"
+            title="Asistentes"
+          >
+            <span class="material-symbols-outlined text-lg">smart_toy</span>
+          </button>
+          <button
             (click)="goToSettings()"
             [class]="navService.currentView() === 'settings'
               ? 'p-2 rounded-lg bg-primary/10 text-primary'
@@ -184,3 +247,28 @@
     </div>
   </div>
 </aside>
+
+@if (contextMenu(); as menu) {
+  <div
+    class="fixed z-[100] w-56 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 shadow-2xl"
+    [style.left.px]="menu.x"
+    [style.top.px]="menu.y"
+    role="menu"
+    (click)="$event.stopPropagation()"
+  >
+    <button type="button" role="menuitem" class="context-action" (click)="showNewFolder(menu.folderId)">
+      <span class="material-symbols-outlined">create_new_folder</span>
+      <span>{{ menu.folderId === null ? ('SIDEBAR.NEW_FOLDER' | translate) : ('SIDEBAR.NEW_SUBFOLDER' | translate) }}</span>
+    </button>
+    <div class="my-1 border-t border-slate-200 dark:border-slate-700"></div>
+    <button type="button" role="menuitem" class="context-action" (click)="createFileInFolder('note', menu.folderId)">
+      <span class="material-symbols-outlined">note_add</span><span>{{ 'NOTE_LIST.NEW_BLANK_NOTE' | translate }}</span>
+    </button>
+    <button type="button" role="menuitem" class="context-action" (click)="createFileInFolder('spreadsheet', menu.folderId)">
+      <span class="material-symbols-outlined">table_view</span><span>{{ 'NOTE_LIST.NEW_EXCEL_NOTE' | translate }}</span>
+    </button>
+    <button type="button" role="menuitem" class="context-action" (click)="createFileInFolder('presentation', menu.folderId)">
+      <span class="material-symbols-outlined">slideshow</span><span>{{ 'NOTE_LIST.NEW_PRESENTATION' | translate }}</span>
+    </button>
+  </div>
+}

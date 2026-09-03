@@ -5,6 +5,7 @@ export interface SettingRow {
   value: string;
 }
 
+/** Recupera un valor serializado del almacén clave-valor. */
 export function getSetting(key: string): string | undefined {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
@@ -13,6 +14,7 @@ export function getSetting(key: string): string | undefined {
   return row?.value;
 }
 
+/** Inserta o reemplaza atómicamente una preferencia. */
 export function setSetting(key: string, value: string): void {
   const db = getDb();
   db.prepare(
@@ -20,6 +22,7 @@ export function setSetting(key: string, value: string): void {
   ).run(key, value);
 }
 
+/** Devuelve todas las preferencias para diagnóstico o respaldo. */
 export function getAllSettings(): SettingRow[] {
   const db = getDb();
   return db.prepare('SELECT key, value FROM settings').all() as SettingRow[];

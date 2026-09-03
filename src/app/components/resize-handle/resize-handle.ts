@@ -25,12 +25,18 @@ import { Component, output } from '@angular/core';
     }
   `,
 })
+/**
+ * Tirador horizontal reutilizable.
+ * Captura el puntero a nivel de documento y emite desplazamientos incrementales
+ * para que el componente padre decida límites y dirección.
+ */
 export class ResizeHandle {
   readonly resizing = output<number>();
 
   private startX = 0;
   private dragging = false;
 
+  /** Inicia el arrastre y registra listeners temporales hasta liberar el botón. */
   onMouseDown(event: MouseEvent): void {
     event.preventDefault();
     this.startX = event.clientX;

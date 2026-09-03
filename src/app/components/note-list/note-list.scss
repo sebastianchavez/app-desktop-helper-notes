@@ -1,3 +1,107 @@
 :host {
   display: contents;
 }
+
+// ── Create note dropdown menu ──
+.create-menu-container {
+  position: relative;
+}
+
+.create-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 100;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  padding: 6px;
+  animation: createMenuIn 0.15s ease-out;
+
+  &.create-menu-collapsed {
+    left: calc(100% + 4px);
+    top: 0;
+    right: auto;
+  }
+}
+
+@keyframes createMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.create-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s;
+  text-align: left;
+
+  &:hover {
+    background: #f1f5f9;
+  }
+}
+
+.create-menu-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.create-menu-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  white-space: nowrap;
+}
+
+.create-menu-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.create-menu-sep {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 4px 8px;
+}
+
+// ── Dark mode ──
+:host-context(.dark) {
+  .create-menu {
+    background: #1e293b;
+    border-color: #334155;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  .create-menu-item:hover {
+    background: #334155;
+  }
+
+  .create-menu-label {
+    color: #e2e8f0;
+  }
+
+  .create-menu-desc {
+    color: #64748b;
+  }
+
+  .create-menu-sep {
+    background: #334155;
+  }
+}

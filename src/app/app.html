@@ -24,6 +24,10 @@
 
   @if (navService.currentView() === 'settings') {
     <app-settings />
+  } @else if (navService.currentView() === 'assistant-settings') {
+    <app-assistant-settings />
+  } @else if (navService.currentView() === 'data-transfer') {
+    <app-data-transfer />
   } @else {
     <!-- Note List -->
     <div

@@ -18,6 +18,11 @@ import { TranslateModule, TranslateService } from '@ngx-translate/core';
   styleUrl: './ai-chat.scss',
   imports: [TranslateModule],
 })
+/**
+ * Presentación del chat de IA.
+ * Delega reglas y persistencia a `AiChatService`, y se ocupa del textarea,
+ * scroll, selectores, confirmaciones y representación de acciones propuestas.
+ */
 export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
   protected readonly chatService = inject(AiChatService);
   protected readonly noteService = inject(NoteService);
@@ -32,20 +37,19 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
   private shouldScrollToBottom = false;
   private prevMessageCount = 0;
 
+  /** Inicializa proveedor, modelos y conversaciones al montar el panel. */
   async ngOnInit(): Promise<void> {
-    await this.chatService.checkOllamaStatus();
-    if (this.chatService.ollamaAvailable()) {
-      await this.chatService.loadModels();
-      await this.chatService.loadConversations();
-    }
+    await this.chatService.initialize();
   }
 
+  /** Cancela una generación para que no sobreviva al componente. */
   ngOnDestroy(): void {
     if (this.chatService.isStreaming()) {
       this.chatService.abort();
     }
   }
 
+  /** Mantiene visible el último mensaje durante inserciones y streaming. */
   ngAfterViewChecked(): void {
     if (this.shouldScrollToBottom) {
       this.scrollToBottom();
@@ -62,6 +66,7 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
     }
   }
 
+  /** Vacía el editor y entrega el mensaje al servicio o a su cola. */
   async onSend(): Promise<void> {
     const text = this.inputText().trim();
     if (!text) return;
@@ -71,6 +76,7 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
     await this.chatService.sendMessage(text);
   }
 
+  /** Envía con Enter y conserva Shift+Enter para saltos de línea. */
   onKeydown(event: KeyboardEvent): void {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -78,6 +84,7 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
     }
   }
 
+  /** Sincroniza el texto y limita el crecimiento automático del textarea. */
   onInput(event: Event): void {
     const textarea = event.target as HTMLTextAreaElement;
     this.inputText.set(textarea.value);
@@ -88,6 +95,11 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
   selectModel(name: string): void {
     this.chatService.setSelectedModel(name);
     this.showModelSelector.set(false);
+  }
+
+  async selectAssistant(id: string): Promise<void> {
+    this.showModelSelector.set(false);
+    await this.chatService.selectAssistant(id);
   }
 
   onClearChat(): void {
@@ -103,6 +115,7 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
     await this.chatService.selectConversation(id);
   }
 
+  /** Implementa una confirmación de dos pasos que caduca tras tres segundos. */
   async onDeleteConversation(id: number, event: Event): Promise<void> {
     event.stopPropagation();
     if (this.confirmDeleteId() === id) {
@@ -122,8 +135,8 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   async onRefreshModels(): Promise<void> {
-    await this.chatService.checkOllamaStatus();
-    if (this.chatService.ollamaAvailable()) {
+    await this.chatService.checkProviderStatus();
+    if (this.chatService.providerAvailable()) {
       await this.chatService.loadModels();
       await this.chatService.loadConversations();
     }
@@ -183,8 +196,10 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
   getActionLabel(action: ChatAction): string {
     switch (action.type) {
       case 'edit_note': return this.translate.instant('AI_CHAT.ACTION_EDIT_NOTE');
+      case 'replace_text': return 'Reemplazar texto';
       case 'create_note': return this.translate.instant('AI_CHAT.ACTION_CREATE_NOTE');
       case 'create_folder': return this.translate.instant('AI_CHAT.ACTION_CREATE_FOLDER');
+      case 'edit_excel': return this.translate.instant('AI_CHAT.ACTION_EDIT_EXCEL');
       default: return this.translate.instant('AI_CHAT.ACTION_DEFAULT');
     }
   }
@@ -192,8 +207,10 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
   getActionIcon(action: ChatAction): string {
     switch (action.type) {
       case 'edit_note': return 'edit_note';
+      case 'replace_text': return 'find_replace';
       case 'create_note': return 'note_add';
       case 'create_folder': return 'create_new_folder';
+      case 'edit_excel': return 'table_chart';
       default: return 'auto_fix_high';
     }
   }
@@ -202,10 +219,14 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
     switch (action.type) {
       case 'edit_note':
         return action.title ? `${this.translate.instant('AI_CHAT.ACTION_TITLE_PREFIX')}: "${action.title}"` : this.translate.instant('AI_CHAT.ACTION_MODIFY_CONTENT');
+      case 'replace_text':
+        return action.find ? `“${action.find}” → “${action.replacement ?? ''}”` : 'Reemplazo de texto';
       case 'create_note':
         return action.title ? `"${action.title}"` : this.translate.instant('AI_CHAT.ACTION_NEW_NOTE');
       case 'create_folder':
         return action.folderName ? `"${action.folderName}"` : this.translate.instant('AI_CHAT.ACTION_NEW_FOLDER');
+      case 'edit_excel':
+        return action.cells ? `${action.cells.length} ${this.translate.instant('AI_CHAT.ACTION_CELLS_TO_UPDATE')}` : this.translate.instant('AI_CHAT.ACTION_MODIFY_SPREADSHEET');
       default:
         return '';
     }
@@ -222,7 +243,7 @@ export class AiChat implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   hasChangePreview(action: ChatAction): boolean {
-    return action.type === 'edit_note' && !!action.changePreview;
+    return (action.type === 'edit_note' || action.type === 'replace_text' || action.type === 'edit_excel') && !!action.changePreview;
   }
 
   async onApplyAction(msg: ChatMessage, action: ChatAction): Promise<void> {
