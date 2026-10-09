@@ -175,6 +175,12 @@ export interface ElectronAPI {
     defaultName: string;
     htmlContent: string;
   }): Promise<{ success: boolean; filePath?: string }>;
+  filePrint(options: {
+    title: string;
+    htmlContent?: string;
+    pdfBase64?: string;
+    landscape?: boolean;
+  }): Promise<{ success: boolean; canceled?: boolean; error?: string }>;
 
   // Window
   windowOpenNote(noteId: number): Promise<void>;

@@ -189,6 +189,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   protected presentationMode = signal(false);
   protected presentedSlideIndex = signal(0);
   protected presentationExporting = signal(false);
+  protected printing = signal(false);
   protected activePresentationRibbonTab = signal<'home' | 'insert' | 'design' | 'transitions' | 'animations' | 'slideshow'>('home');
   protected activePresentationTextTarget = signal<'title' | 'body'>('title');
   protected activePresentationAnimationTarget = signal<'title' | 'body' | 'both'>('title');
@@ -699,6 +700,11 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
   @HostListener('document:keydown', ['$event'])
   onPresentationKeydown(event: KeyboardEvent): void {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
+      event.preventDefault();
+      void this.printCurrentDocument();
+      return;
+    }
     if (!this.presentationMode()) return;
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -3013,6 +3019,114 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
         this.downloadService.dismiss(fileName);
       }
     } catch { this.downloadService.showError(fileName); }
+  }
+
+  protected async printCurrentDocument(): Promise<void> {
+    const note = this.noteService.selectedNote();
+    if (!note || this.printing()) return;
+    this.printing.set(true);
+
+    try {
+      let result: { success: boolean; canceled?: boolean; error?: string };
+      if (note.file_type === 'pdf') {
+        const fullNote = await window.electronAPI.notesGetById(note.id);
+        if (!fullNote?.file_data) throw new Error('El PDF no contiene datos para imprimir.');
+        result = await window.electronAPI.filePrint({
+          title: this.title() || note.title || 'Documento PDF',
+          pdfBase64: fullNote.file_data,
+        });
+      } else if (note.file_type === 'xlsx') {
+        result = await window.electronAPI.filePrint({
+          title: this.title() || note.title || 'Hoja de cálculo',
+          htmlContent: this.buildPrintableSpreadsheet(),
+          landscape: true,
+        });
+      } else if (note.file_type === 'pptx') {
+        result = await window.electronAPI.filePrint({
+          title: this.title() || note.title || 'Presentación',
+          htmlContent: this.buildPrintablePresentation(),
+          landscape: true,
+        });
+      } else {
+        const title = this.title() || note.title || 'Nota';
+        result = await window.electronAPI.filePrint({
+          title,
+          htmlContent: `<article class="print-note"><h1>${this.escapeXml(title)}</h1>${this.content() || ''}</article>`,
+        });
+      }
+
+      if (!result.success && !result.canceled) {
+        console.error('Error al imprimir:', result.error);
+        window.alert(this.translate.instant('NOTE_EDITOR.PRINT_ERROR'));
+      }
+    } catch (error) {
+      console.error('Error al preparar la impresión:', error);
+      window.alert(this.translate.instant('NOTE_EDITOR.PRINT_ERROR'));
+    } finally {
+      this.printing.set(false);
+    }
+  }
+
+  private buildPrintableSpreadsheet(): string {
+    const sheet = this.activeSheet;
+    const documentTitle = this.escapeXml(this.title() || 'Hoja de cálculo');
+    if (!sheet) return `<h1>${documentTitle}</h1><p>${this.escapeXml(this.translate.instant('NOTE_EDITOR.NO_PRINTABLE_CONTENT'))}</p>`;
+
+    let lastRow = -1;
+    let lastColumn = -1;
+    sheet.data.forEach((row, rowIndex) => row.forEach((value, columnIndex) => {
+      if (value !== null && value !== '') {
+        lastRow = Math.max(lastRow, rowIndex);
+        lastColumn = Math.max(lastColumn, columnIndex);
+      }
+    }));
+    const rowCount = Math.max(1, lastRow + 1);
+    const columnCount = Math.max(1, lastColumn + 1);
+    const headers = Array.from({ length: columnCount }, (_, index) =>
+      `<th>${this.getColumnLabel(index)}</th>`,
+    ).join('');
+    const rows = Array.from({ length: rowCount }, (_, rowIndex) => {
+      const cells = Array.from({ length: columnCount }, (_, columnIndex) => {
+        const value = sheet.data[rowIndex]?.[columnIndex] ?? '';
+        const format = this.xlsxCellFormats.get(`${this.activeSheetIndex()}:${rowIndex}:${columnIndex}`);
+        const styles = [
+          format?.bold ? 'font-weight:700' : '',
+          format?.italic ? 'font-style:italic' : '',
+          format?.underline ? 'text-decoration:underline' : '',
+          format?.align ? `text-align:${format.align}` : typeof value === 'number' ? 'text-align:right' : '',
+          format?.fontSize ? `font-size:${Math.max(8, Math.min(28, format.fontSize))}pt` : '',
+        ].filter(Boolean).join(';');
+        return `<td${styles ? ` style="${styles}"` : ''}>${this.escapeXml(String(value))}</td>`;
+      }).join('');
+      return `<tr><th>${rowIndex + 1}</th>${cells}</tr>`;
+    }).join('');
+
+    return `<h1 class="print-sheet-title">${documentTitle} — ${this.escapeXml(sheet.name)}</h1><table><thead><tr><th></th>${headers}</tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  private buildPrintablePresentation(): string {
+    const slides = this.presentationSlides();
+    if (slides.length === 0) {
+      return `<p>${this.escapeXml(this.translate.instant('NOTE_EDITOR.NO_PRINTABLE_CONTENT'))}</p>`;
+    }
+    return slides.map(slide => {
+      const titleStyle = [
+        `font-size:${slide.style.titleFontSize}pt`,
+        `text-align:${slide.style.titleAlign}`,
+        slide.style.titleBold ? 'font-weight:700' : '',
+        slide.style.titleItalic ? 'font-style:italic' : '',
+        slide.style.titleUnderline ? 'text-decoration:underline' : '',
+      ].filter(Boolean).join(';');
+      const bodyStyle = [
+        `font-size:${slide.style.bodyFontSize}pt`,
+        `text-align:${slide.style.bodyAlign}`,
+        slide.style.bodyBold ? 'font-weight:700' : '',
+        slide.style.bodyItalic ? 'font-style:italic' : '',
+        slide.style.bodyUnderline ? 'text-decoration:underline' : '',
+      ].filter(Boolean).join(';');
+      const body = this.escapeXml(slide.body).replace(/\n/g, '<br>');
+      return `<section class="print-slide" style="background:${slide.style.backgroundColor};color:${slide.style.textColor};border-top:8pt solid ${slide.style.accentColor}"><h1 style="${titleStyle}">${this.escapeXml(slide.title)}</h1>${slide.layout === 'title-only' ? '' : `<div class="print-slide-body" style="${bodyStyle}">${body}</div>`}</section>`;
+    }).join('');
   }
 
   // ── Download as .pptx ──

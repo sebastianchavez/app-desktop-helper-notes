@@ -3,18 +3,26 @@
   "main": "electron-dist/main.js",
   "version": "1.0.0",
   "author": "Schavez",
+  "description": "Aplicación de escritorio para crear y organizar notas, documentos y presentaciones.",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
+    "test": "ng test",
     "watch": "ng build --watch --configuration development",
     "electron": "ng build && npm run electron:build && electron .",
-    "build:electron": "ng build && npm run electron:build && electron-builder",
+    "build:electron": "node scripts/build-current-platform.js",
     "electron:build": "tsc -p electron/tsconfig.json",
     "format": "prettier --write \"electron/**/*.{ts,js}\" \"src/**/*.{ts,html,scss}\"",
     "electron:run": "electron electron-dist/main.js",
     "electron:dev": "concurrently \"ng serve\" \"npm run electron:build -- --watch\" \"wait-on http://localhost:4200 && cross-env ELECTRON_DEV_URL=http://localhost:4200 electron electron-dist/main.js\"",
-    "dist:win": "node scripts/build-win.js"
+    "dist:win": "node scripts/build-win.js",
+    "dist:linux": "node scripts/build-platform.js linux",
+    "dist:linux:x64": "node scripts/build-platform.js linux x64",
+    "dist:linux:arm64": "node scripts/build-platform.js linux arm64",
+    "dist:mac": "node scripts/build-platform.js mac",
+    "dist:mac:x64": "node scripts/build-platform.js mac x64",
+    "dist:mac:arm64": "node scripts/build-platform.js mac arm64"
   },
   "prettier": {
     "printWidth": 100,
@@ -32,7 +40,7 @@
   "build": {
     "appId": "com.schavez.helper-notes",
     "productName": "Helper Notes",
-    "artifactName": "Helper-Notes-${version}-${arch}.${ext}",
+    "artifactName": "Helper-Notes-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -42,10 +50,42 @@
       "assets/**/*",
       "package.json"
     ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "npmRebuild": true,
     "extraResources": [],
     "win": {
       "target": "nsis",
       "icon": "assets/favicon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon-mac.png",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "Helper Notes ${version}",
+      "artifactName": "Helper-Notes-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/favicon.png",
+      "category": "Office",
+      "maintainer": "Schavez",
+      "executableName": "helper-notes",
+      "synopsis": "Notas, documentos y asistencia local"
     },
     "nsis": {
       "oneClick": false,

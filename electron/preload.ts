@@ -122,6 +122,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fileShowInFolder: (filePath: string) => ipcRenderer.invoke('file:showInFolder', filePath),
   filePrintToPdf: (options: { defaultName: string; htmlContent: string }) =>
     ipcRenderer.invoke('file:printToPdf', options),
+  filePrint: (options: {
+    title: string;
+    htmlContent?: string;
+    pdfBase64?: string;
+    landscape?: boolean;
+  }) => ipcRenderer.invoke('file:print', options),
 
   // ── Window ──
   windowOpenNote: (noteId: number) => ipcRenderer.invoke('window:openNote', noteId),

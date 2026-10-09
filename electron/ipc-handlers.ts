@@ -1,7 +1,8 @@
 import { ipcMain, dialog, BrowserWindow, shell } from 'electron';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'fs';
 import { execSync, spawn, ChildProcess } from 'child_process';
 import http from 'http';
+import os from 'os';
 import path from 'path';
 import { inflateRawSync } from 'zlib';
 import * as XLSX from 'xlsx';
@@ -37,6 +38,7 @@ import {
   findBackupFiles,
   importBackupPaths,
 } from './backup-manager';
+import { applicationIconPath } from './platform-assets';
 import { parsePptxBuffer } from './presentation-parser';
 
 // Families that are NOT conversational (embedding, vision-only, code-only, etc.)
@@ -44,6 +46,104 @@ const NON_CHAT_PATTERNS = /\b(embed|embedding|all-minilm|bge-|nomic-embed|mxbae|
 
 type XlsxCellValue = string | number | boolean | null;
 type XlsxCellUpdate = { row: number; col: number; value: XlsxCellValue; formula?: string | null };
+type PrintDocumentOptions = {
+  title: string;
+  htmlContent?: string;
+  pdfBase64?: string;
+  landscape?: boolean;
+};
+
+const MAX_PRINT_HTML_BYTES = 25 * 1024 * 1024;
+const MAX_PRINT_PDF_BYTES = 100 * 1024 * 1024;
+
+function printableHtml(title: string, content: string, landscape: boolean): string {
+  const safeTitle = title.replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character] ?? character);
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'">
+<title>${safeTitle}</title><style>
+  @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #0f172a; background: #fff; font: 12pt/1.5 'Segoe UI', Arial, sans-serif; }
+  h1 { font-size: 24pt; line-height: 1.2; margin: 0 0 14pt; }
+  h2 { font-size: 18pt; margin: 14pt 0 7pt; }
+  h3 { font-size: 14pt; margin: 12pt 0 6pt; }
+  p { margin: 6pt 0; }
+  ul, ol { margin: 6pt 0; padding-left: 24pt; }
+  img { max-width: 100%; height: auto; break-inside: avoid; }
+  table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+  th, td { border: 1px solid #94a3b8; padding: 4pt 5pt; text-align: left; vertical-align: top; }
+  th { background: #e2e8f0; font-weight: 700; }
+  tr { break-inside: avoid; }
+  .print-sheet-title { margin-bottom: 10pt; }
+  .print-slide { width: 100%; min-height: 175mm; padding: 16mm; overflow: hidden; break-after: page; position: relative; }
+  .print-slide:last-child { break-after: auto; }
+  .print-slide h1 { color: inherit; }
+  .print-slide-body { white-space: pre-wrap; }
+</style></head><body>${content}</body></html>`;
+}
+
+async function printDocument(options: PrintDocumentOptions): Promise<{ success: boolean; canceled?: boolean; error?: string }> {
+  if (!options || typeof options !== 'object') {
+    return { success: false, error: 'La solicitud de impresión no es válida.' };
+  }
+  const title = String(options.title || 'Documento').slice(0, 300);
+  const hasHtml = typeof options.htmlContent === 'string';
+  const hasPdf = typeof options.pdfBase64 === 'string';
+  if (hasHtml === hasPdf) return { success: false, error: 'Debe enviarse un documento HTML o PDF.' };
+
+  const tempDirectory = mkdtempSync(path.join(os.tmpdir(), 'helper-notes-print-'));
+  const extension = hasPdf ? 'pdf' : 'html';
+  const documentPath = path.join(tempDirectory, `documento.${extension}`);
+  const printWindow = new BrowserWindow({
+    show: false,
+    width: options.landscape ? 1120 : 820,
+    height: options.landscape ? 780 : 1060,
+    webPreferences: { javascript: false, sandbox: true, contextIsolation: true },
+  });
+
+  try {
+    if (hasPdf) {
+      if (options.pdfBase64!.length > Math.ceil(MAX_PRINT_PDF_BYTES * 4 / 3) + 4) {
+        return { success: false, error: 'El archivo PDF supera el límite permitido.' };
+      }
+      const pdf = Buffer.from(options.pdfBase64!, 'base64');
+      if (pdf.length === 0 || pdf.length > MAX_PRINT_PDF_BYTES || pdf.subarray(0, 4).toString() !== '%PDF') {
+        return { success: false, error: 'El archivo PDF no es válido o supera el límite permitido.' };
+      }
+      writeFileSync(documentPath, pdf);
+    } else {
+      const html = printableHtml(title, options.htmlContent!, Boolean(options.landscape));
+      if (Buffer.byteLength(html, 'utf8') > MAX_PRINT_HTML_BYTES) {
+        return { success: false, error: 'El documento es demasiado grande para imprimirlo.' };
+      }
+      writeFileSync(documentPath, html, 'utf8');
+    }
+
+    await printWindow.loadFile(documentPath);
+    return await new Promise(resolve => {
+      printWindow.webContents.print(
+        { silent: false, printBackground: true },
+        (success, failureReason) => {
+          if (success) resolve({ success: true });
+          else if (failureReason === 'Print job canceled') resolve({ success: false, canceled: true });
+          else resolve({ success: false, error: failureReason || 'No se pudo imprimir el documento.' });
+        },
+      );
+    });
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    if (!printWindow.isDestroyed()) printWindow.destroy();
+    try {
+      rmSync(tempDirectory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    } catch {
+      // El sistema operativo puede mantener el archivo bloqueado unos instantes tras imprimir.
+    }
+  }
+}
 
 /**
  * Aplica valor o fórmula a una celda y elimina metadatos incompatibles del
@@ -617,7 +717,7 @@ export function registerIpcHandlers() {
       minWidth: 600,
       minHeight: 400,
       title: 'Helper Notes',
-      icon: path.join(__dirname, '../assets/favicon.ico'),
+      icon: applicationIconPath(),
       resizable: true,
       parent: parentWin ?? undefined,
       webPreferences: {
@@ -692,6 +792,8 @@ export function registerIpcHandlers() {
       if (!pdfWin.isDestroyed()) pdfWin.destroy();
     }
   });
+
+  ipcMain.handle('file:print', async (_event, options: PrintDocumentOptions) => printDocument(options));
 
   ipcMain.handle('window:setFullScreen', (_event, enabled: boolean) => {
     const win = BrowserWindow.getFocusedWindow();

@@ -26,6 +26,15 @@
         <span class="material-symbols-outlined text-sm">download</span>
         {{ 'NOTE_EDITOR.DOWNLOAD_PDF' | translate }}
       </button>
+      <button
+        class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+        [disabled]="printing()"
+        [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate"
+        (click)="printCurrentDocument()"
+      >
+        <span class="material-symbols-outlined text-sm">print</span>
+        {{ 'NOTE_EDITOR.PRINT' | translate }}
+      </button>
     </div>
     <div class="flex-1 overflow-hidden">
       @if (pdfUrl()) {
@@ -48,6 +57,7 @@
           <input class="ppt-title-input" type="text" [placeholder]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate" [value]="title()" (input)="onTitleChange($any($event.target).value)" />
           <button class="ppt-toolbar-btn" [title]="'NOTE_EDITOR.AI_ASSISTANT' | translate" (click)="aiChatToggle.emit()"><span class="material-symbols-outlined">smart_toy</span></button>
           <button class="ppt-action-btn ppt-present-btn" (click)="startPresentation(true)"><span class="material-symbols-outlined">play_arrow</span>{{ 'NOTE_EDITOR.PPT_PRESENT' | translate }}</button>
+          <button class="ppt-action-btn" [disabled]="printing()" [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate" (click)="printCurrentDocument()"><span class="material-symbols-outlined">print</span>{{ 'NOTE_EDITOR.PRINT' | translate }}</button>
           <button class="ppt-action-btn" [disabled]="presentationExporting()" (click)="downloadPresentationFile()"><span class="material-symbols-outlined">download</span>{{ 'NOTE_EDITOR.PPT_EXPORT' | translate }}</button>
         </div>
 
@@ -257,6 +267,14 @@
           (click)="aiChatToggle.emit()"
         >
           <span class="material-symbols-outlined text-base">smart_toy</span>
+        </button>
+        <button
+          class="flex items-center justify-center w-7 h-7 rounded hover:bg-white/10 text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+          [disabled]="printing()"
+          [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate"
+          (click)="printCurrentDocument()"
+        >
+          <span class="material-symbols-outlined text-base">print</span>
         </button>
         <div class="xlsx-export-control">
           <span class="material-symbols-outlined text-sm">download</span>
@@ -797,6 +815,15 @@
         (click)="aiChatToggle.emit()"
       >
         <span class="material-symbols-outlined text-base">smart_toy</span>
+      </button>
+
+      <button
+        class="toolbar-btn"
+        [disabled]="printing()"
+        [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate"
+        (click)="printCurrentDocument()"
+      >
+        <span class="material-symbols-outlined text-base">print</span>
       </button>
 
       <!-- Spacer to push download to the right -->

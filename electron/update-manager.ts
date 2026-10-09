@@ -123,9 +123,11 @@ export class UpdateManager {
         throw new Error(`No fue posible descargar el instalador (${response.status}).`);
       const directory = path.join(app.getPath('temp'), 'helper-notes-updates');
       await fs.mkdir(directory, { recursive: true });
+      const defaultExtension =
+        process.platform === 'darwin' ? 'dmg' : process.platform === 'linux' ? 'AppImage' : 'exe';
       const fileName =
         path.basename(update.fileName || new URL(update.downloadUrl).pathname) ||
-        `helper-notes-${update.version}.exe`;
+        `helper-notes-${update.version}.${defaultExtension}`;
       const filePath = path.join(directory, fileName);
 
       // El stream evita cargar instaladores grandes completos en memoria.
@@ -160,6 +162,11 @@ export class UpdateManager {
     try {
       if (process.platform === 'win32') {
         spawn(filePath, ['/S'], { detached: true, stdio: 'ignore' }).unref();
+        app.quit();
+      } else if (process.platform === 'linux' && filePath.endsWith('.AppImage')) {
+        // Los archivos descargados no reciben permiso de ejecución automáticamente.
+        await fs.chmod(filePath, 0o755);
+        spawn(filePath, [], { detached: true, stdio: 'ignore' }).unref();
         app.quit();
       } else {
         const error = await shell.openPath(filePath);

@@ -11,10 +11,11 @@ Está desarrollada con Angular, Electron y SQLite. La información se guarda loc
 - Incluye un editor de hojas de cálculo dentro de la propia aplicación.
 - Importa archivos TXT, HTML, DOCX, PDF, XLSX, XLS, CSV y PPTX, además de respaldos JSON.
 - Exporta notas como TXT, HTML, DOCX, PPTX, PDF, XLSX o JSON.
+- Imprime notas, PDF, la hoja de cálculo activa y presentaciones mediante el diálogo nativo (`Ctrl+P`).
 - Integra modelos locales de Ollama que pueden conversar sobre la nota abierta y proponer cambios.
 - Permite aplicar o rechazar individualmente las acciones sugeridas por la IA.
 - Usa SQLite local en lugar de iCloud. Actualmente no incluye sincronización entre dispositivos ni colaboración en línea.
-- Su distribución empaquetada actual está orientada a Windows mediante un instalador NSIS.
+- Genera instaladores nativos para Windows, Linux y macOS.
 
 ## Funcionalidades
 
@@ -151,7 +152,7 @@ Ollama y llama.cpp son opcionales: las notas, carpetas, archivos y el resto de l
 - Bandeja del sistema: cerrar la ventana la oculta; la opción **Salir** del tray termina el proceso.
 - Menú contextual nativo para deshacer, rehacer, cortar, copiar y pegar.
 - Diálogos nativos para confirmar acciones, abrir archivos y guardar exportaciones.
-- Instalador de Windows con selección del directorio de instalación.
+- Instaladores nativos: NSIS para Windows, AppImage/DEB para Linux y DMG/ZIP para macOS.
 
 ## Stack tecnológico
 
@@ -164,7 +165,7 @@ Ollama y llama.cpp son opcionales: las notas, carpetas, archivos y el resto de l
 | SheetJS (`xlsx`) | 0.18 | Lectura, edición y escritura de hojas de cálculo. |
 | Tailwind CSS | 3 | Utilidades de estilos y temas. |
 | ngx-translate | 17 | Internacionalización. |
-| electron-builder | 26 | Empaquetado e instalador NSIS. |
+| electron-builder | 26 | Empaquetado NSIS, AppImage, DEB, DMG y ZIP. |
 | Vitest | 4 | Pruebas unitarias de Angular. |
 
 La comunicación entre Angular y Electron se realiza a través de un `preload` con `contextIsolation` habilitado y una API IPC explícita; el renderer no tiene acceso directo a Node.js.
@@ -189,7 +190,7 @@ La aplicación consulta la API de versiones después de iniciarse y luego cada s
 
 - descarga el instalador desde la URL registrada;
 - valida su hash SHA-256 cuando está disponible;
-- solicita instalarlo y, en Windows, ejecuta silenciosamente el instalador NSIS;
+- solicita instalarlo; ejecuta NSIS silenciosamente en Windows, abre DMG en macOS y puede iniciar una AppImage descargada en Linux;
 - expone controles IPC para comprobar, descargar o instalar manualmente.
 
 Copie `.env.example` como `.env` para desarrollo o defina estas variables en el entorno del proceso:
@@ -203,11 +204,16 @@ Copie `.env.example` como `.env` para desarrollo o defina estas variables en el 
 | `HELPER_NOTES_UPDATE_INITIAL_DELAY_MS` | `5000` | Espera inicial. |
 | `HELPER_NOTES_UPDATE_INTERVAL_MS` | `21600000` | Intervalo entre comprobaciones. |
 
-El número publicado debe ser superior al campo `version` de `package.json`. Antes de distribuir una compilación nueva, actualice ese campo y genere el instalador con `npm run dist:win`.
+El número publicado debe ser superior al campo `version` de `package.json`. Antes de distribuir una compilación nueva, actualice ese campo y genere el instalador correspondiente a la plataforma.
 
 ## Requisitos
 
-- Windows para generar y utilizar el instalador NSIS configurado por el proyecto.
+- Windows para generar NSIS.
+- Linux para generar AppImage y DEB.
+- macOS para generar DMG y ZIP. La firma y notarización requieren certificados de Apple; las compilaciones locales y el workflow quedan sin firmar si no se configuran credenciales.
+- Node.js 22 y npm.
+
+Los paquetes se construyen en su sistema destino porque `better-sqlite3` contiene código nativo. No se debe generar el paquete de macOS o Linux desde Windows.
 - [Node.js](https://nodejs.org/) `20.19` o superior compatible con Angular 21 (`22.12+` o `24+` también son compatibles).
 - npm 10 o superior.
 - [Ollama](https://ollama.com/download) con un modelo conversacional, o un `llama-server` de llama.cpp accesible por HTTP, únicamente para usar el asistente de IA.
@@ -232,8 +238,17 @@ Otros comandos útiles:
 | `npm run electron:build` | Compila el proceso principal y el preload de Electron en `electron-dist/`. |
 | `npm run electron:run` | Ejecuta el proceso de Electron ya compilado. |
 | `npm run electron` | Compila Angular y Electron, y luego abre la aplicación. |
-| `npm run build:electron` | Compila Angular y Electron y empaqueta la aplicación con electron-builder. |
+| `npm run build:electron` | Compila y empaqueta para la plataforma y arquitectura del equipo actual. |
 | `npm run dist:win` | Genera el instalador de Windows en `release/`. |
+| `npm run dist:linux` | Genera AppImage y DEB para la arquitectura del equipo Linux. |
+| `npm run dist:linux:x64` | Genera AppImage y DEB para Linux x64. |
+| `npm run dist:linux:arm64` | Genera AppImage y DEB para Linux ARM64. |
+| `npm run dist:mac` | Genera DMG y ZIP para la arquitectura del Mac. |
+| `npm run dist:mac:x64` | Genera DMG y ZIP para macOS Intel. |
+| `npm run dist:mac:arm64` | Genera DMG y ZIP para Apple Silicon. |
+| `npm test -- --watch=false` | Ejecuta las pruebas una vez. |
+
+Las salidas se separan en `release/linux-<arquitectura>/` y `release/mac-<arquitectura>/`. El workflow `.github/workflows/build-desktop.yml` ejecuta estas compilaciones en runners nativos al publicar una etiqueta `v*` o manualmente desde GitHub Actions.
 | `npx ng test` | Ejecuta las pruebas unitarias con Vitest. |
 
 ## Estructura del proyecto
@@ -241,6 +256,7 @@ Otros comandos útiles:
 ```text
 helper-notes-app-desktop/
 ├── assets/                    # Iconos de la aplicación y del instalador
+├── build/                     # Entitlements y recursos generados para macOS
 ├── electron/
 │   ├── db/                    # Inicialización de SQLite y repositorios
 │   ├── ipc-handlers.ts        # Archivos, ventanas, hojas de cálculo y Ollama
@@ -249,7 +265,7 @@ helper-notes-app-desktop/
 │   └── preload.ts             # API segura expuesta a Angular
 ├── public/
 │   └── i18n/                  # Traducciones JSON
-├── scripts/                   # Utilidades de compilación para Windows
+├── scripts/                   # Utilidades de compilación por plataforma
 ├── src/
 │   └── app/
 │       ├── components/        # Sidebar, lista, editor, IA y configuración

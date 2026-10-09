@@ -4,6 +4,7 @@ import path from 'path';
 import { initDb } from './db/db';
 import { registerIpcHandlers } from './ipc-handlers';
 import { UpdateManager } from './update-manager';
+import { applicationIconPath } from './platform-assets';
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -12,7 +13,7 @@ let updateManager: UpdateManager | null = null;
 
 /** Crea el icono de bandeja y sus acciones para restaurar o cerrar la aplicación. */
 function createTray() {
-  const iconPath = path.join(__dirname, '../assets/favicon.ico');
+  const iconPath = applicationIconPath();
   tray = new Tray(nativeImage.createFromPath(iconPath));
 
   const contextMenu = Menu.buildFromTemplate([
@@ -57,7 +58,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'Helper Notes',
-    icon: path.join(__dirname, '../assets/favicon.ico'),
+    icon: applicationIconPath(),
     resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

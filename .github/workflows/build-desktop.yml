@@ -1,0 +1,42 @@
+name: Build desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            command: dist:linux:x64
+            artifact: helper-notes-linux-x64
+            output: release/linux-x64/*
+          - os: macos-14
+            command: dist:mac:x64
+            artifact: helper-notes-mac-x64
+            output: release/mac-x64/*
+          - os: macos-14
+            command: dist:mac:arm64
+            artifact: helper-notes-mac-arm64
+            output: release/mac-arm64/*
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run ${{ matrix.command }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error

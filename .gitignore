@@ -7,6 +7,7 @@
 /bazel-out
 /electron-dist
 /release
+/build/icon-mac.png
 
 # Node
 /node_modules
