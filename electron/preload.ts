@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { SUPPORTED_DOCUMENT_EXTENSIONS } from './document-types';
 
 /**
  * Superficie segura entre el renderer y el proceso principal.
@@ -9,7 +10,36 @@ import { contextBridge, ipcRenderer } from 'electron';
  * interfaz `ElectronAPI` declarada en el renderer.
  */
 contextBridge.exposeInMainWorld('electronAPI', {
+  /** Recibe libro y operación de gráfico; retorna datos de vista previa o el XLSX completo actualizado. */
+  xlsxChart: (
+    base64: string,
+    action: 'preview' | 'save' | 'delete' | 'refresh',
+    definition?: import('./spreadsheet-chart').ChartDefinition,
+    id?: string,
+  ) => ipcRenderer.invoke('xlsx:chart', base64, action, definition, id),
+  /** Recibe libro, operación y configuración de tabla dinámica; retorna vista previa o XLSX completo actualizado. */
+  xlsxPivot: (
+    base64: string,
+    action: 'preview' | 'save' | 'refresh',
+    definition?: import('./spreadsheet-pivot').PivotDefinition,
+  ) => ipcRenderer.invoke('xlsx:pivot', base64, action, definition),
   platform: process.platform,
+  /** Ejecuta una acción explícita del usuario en el portapapeles nativo; no expone su contenido. */
+  wordClipboardExecute: (command: 'copy' | 'cut' | 'paste' | 'pastePlain') =>
+    ipcRenderer.invoke('word:clipboard', command),
+  /** Escribe la imagen copiada por el usuario como PNG nativo; recibe Base64 y confirma la escritura. */
+  wordClipboardWriteImage: (pngBase64: string) =>
+    ipcRenderer.invoke('word:clipboardImage', pngBase64),
+  onWordClipboardCommand: (
+    callback: (command: 'copy' | 'cut' | 'paste' | 'pastePlain') => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      command: 'copy' | 'cut' | 'paste' | 'pastePlain',
+    ) => callback(command);
+    ipcRenderer.on('word:clipboard-command', handler);
+    return () => ipcRenderer.removeListener('word:clipboard-command', handler);
+  },
 
   // ── Updates ──
   updatesGetState: () => ipcRenderer.invoke('updates:getState'),
@@ -31,6 +61,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   foldersCreate: (name: string, parentId: number | null = null) =>
     ipcRenderer.invoke('folders:create', name, parentId),
   foldersUpdate: (id: number, name: string) => ipcRenderer.invoke('folders:update', id, name),
+  foldersMove: (id: number, parentId: number | null) =>
+    ipcRenderer.invoke('folders:move', id, parentId),
   foldersDelete: (id: number) => ipcRenderer.invoke('folders:delete', id),
 
   // ── Notes ──
@@ -49,6 +81,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   ) => ipcRenderer.invoke('notes:update', id, data),
   notesDelete: (id: number) => ipcRenderer.invoke('notes:delete', id),
+  /** Guarda el DOCX exportado; recibe id y Base64 y retorna los metadatos persistidos. */
+  wordSave: (noteId: number, base64: string) => ipcRenderer.invoke('word:save', noteId, base64),
 
   // ── Settings ──
   settingsGet: (key: string) => ipcRenderer.invoke('settings:get', key),
@@ -72,6 +106,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   backupImportFiles: () => ipcRenderer.invoke('backup:importFiles'),
   backupImportFolder: () => ipcRenderer.invoke('backup:importFolder'),
   fileImport: () => ipcRenderer.invoke('file:import'),
+  fileSupportedExtensions: [...SUPPORTED_DOCUMENT_EXTENSIONS],
+  /** Recibe un File de Chromium y retorna su ruta física, o una cadena vacía si no existe. */
+  fileGetPath: (file: File) => webUtils.getPathForFile(file),
+  /** Recibe rutas absolutas y retorna una promesa con los documentos convertidos y sus errores. */
+  fileImportPaths: (paths: string[]) => ipcRenderer.invoke('file:importPaths', paths),
+  /** Sin parámetros: retorna y consume las rutas de apertura pendientes en el proceso principal. */
+  fileTakePendingOpen: () => ipcRenderer.invoke('file:takePendingOpen'),
+  /** Recibe el callback de nuevas aperturas y retorna una función para retirar el listener. */
+  onFileOpenRequested: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('file:openRequested', handler);
+    return () => ipcRenderer.removeListener('file:openRequested', handler);
+  },
   fileImportJson: () => ipcRenderer.invoke('file:importJson'),
   fileExportXlsx: (options: { defaultName: string; htmlContent: string; title: string }) =>
     ipcRenderer.invoke('file:exportXlsx', options),
@@ -112,7 +159,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       formula: string;
     }[],
     merges: { s: { r: number; c: number }; e: { r: number; c: number } }[],
-  ) => ipcRenderer.invoke('xlsx:replaceSheetData', base64, sheetIndex, data, formulas, merges),
+    options?: import('./spreadsheet-edit').SpreadsheetEditOptions,
+  ) =>
+    ipcRenderer.invoke(
+      'xlsx:replaceSheetData',
+      base64,
+      sheetIndex,
+      data,
+      formulas,
+      merges,
+      options,
+    ),
   xlsxUpdateDimensions: (
     base64: string,
     sheetIndex: number,

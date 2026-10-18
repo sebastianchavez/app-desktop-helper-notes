@@ -15,7 +15,7 @@ import { Folder } from '../../models/folder.model';
 /**
  * Árbol de navegación de carpetas y accesos a vistas auxiliares.
  * Implementa edición inline, menú contextual, expansión jerárquica y destino
- * de drag-and-drop para mover notas.
+ * de drag-and-drop para mover notas, archivos y ramas de carpetas.
  */
 export class Sidebar implements OnInit {
   protected readonly noteService = inject(NoteService);
@@ -30,6 +30,8 @@ export class Sidebar implements OnInit {
   protected expandedFolderIds = signal<Set<number>>(new Set());
   protected contextMenu = signal<{ x: number; y: number; folderId: number | null } | null>(null);
   protected dragOverFolderId = signal<number | null | 'all'>(null);
+  protected draggedFolderId = signal<number | null>(null);
+  protected moveError = signal(false);
 
   /** Whether the sidebar is in collapsed state */
   collapsed = input(false);
@@ -185,27 +187,79 @@ export class Sidebar implements OnInit {
   }
 
   // ── Drag & drop ──
-  /** Acepta únicamente el MIME interno usado por elementos de la lista de notas. */
-  onDragOver(event: DragEvent, folderId: number | null): void {
-    if (event.dataTransfer?.types.includes('application/note-id')) {
+  onFolderDragStart(event: DragEvent, folderId: number): void {
+    const button = (event.target as Element | null)?.closest('button');
+    if (!event.dataTransfer || this.aiChatService.isStreaming() ||
+        this.editingFolderId() !== null || (button && button !== event.currentTarget)) {
       event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      this.dragOverFolderId.set(folderId ?? 'all');
+      return;
     }
+    this.closeContextMenu();
+    this.moveError.set(false);
+    this.draggedFolderId.set(folderId);
+    event.dataTransfer.setData('application/folder-id', String(folderId));
+    event.dataTransfer.effectAllowed = 'move';
+    event.stopPropagation();
   }
 
-  onDragLeave(): void {
+  @HostListener('document:dragend')
+  @HostListener('document:drop')
+  onDragEnd(): void {
+    this.draggedFolderId.set(null);
     this.dragOverFolderId.set(null);
   }
 
-  /** Mueve la nota soltada a la carpeta destino y limpia el indicador visual. */
+  /** Indica sólo destinos válidos para los MIME internos de notas y carpetas. */
+  onDragOver(event: DragEvent, folderId: number | null): void {
+    const transfer = event.dataTransfer;
+    if (!transfer) return;
+    const isFolder = transfer.types.includes('application/folder-id');
+    const isNote = transfer.types.includes('application/note-id');
+    if (!isFolder && !isNote) return;
+    event.stopPropagation();
+    const sourceId = this.draggedFolderId();
+    if (this.aiChatService.isStreaming() || (isFolder &&
+        (sourceId === null || !this.noteService.canMoveFolder(sourceId, folderId)))) {
+      transfer.dropEffect = 'none';
+      this.dragOverFolderId.set(null);
+      return;
+    }
+    event.preventDefault();
+    transfer.dropEffect = 'move';
+    this.dragOverFolderId.set(folderId ?? 'all');
+  }
+
+  onDragLeave(event: DragEvent): void {
+    if (event.relatedTarget instanceof Node &&
+        (event.currentTarget as HTMLElement).contains(event.relatedTarget)) return;
+    this.dragOverFolderId.set(null);
+  }
+
+  /** Mueve el elemento y abre el destino para mostrar la nueva ubicación de la rama. */
   async onDrop(event: DragEvent, folderId: number | null): Promise<void> {
     event.preventDefault();
-    this.dragOverFolderId.set(null);
-    const noteIdStr = event.dataTransfer?.getData('application/note-id');
-    if (!noteIdStr) return;
-    const noteId = parseInt(noteIdStr, 10);
-    if (isNaN(noteId)) return;
-    await this.noteService.moveNoteToFolder(noteId, folderId);
+    event.stopPropagation();
+    this.onDragEnd();
+    if (this.aiChatService.isStreaming()) return;
+    const transfer = event.dataTransfer;
+    const isFolder = transfer?.types.includes('application/folder-id');
+    const rawId = transfer?.getData(isFolder ? 'application/folder-id' : 'application/note-id');
+    if (!rawId || !/^\d+$/.test(rawId)) return;
+    const id = Number(rawId);
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    this.moveError.set(false);
+    try {
+      if (isFolder) {
+        if (!this.noteService.canMoveFolder(id, folderId)) return;
+        await this.noteService.moveFolder(id, folderId);
+        if (folderId !== null) {
+          this.expandedFolderIds.update(ids => new Set([...ids, folderId]));
+        }
+      } else {
+        await this.noteService.moveNoteToFolder(id, folderId);
+      }
+    } catch {
+      this.moveError.set(true);
+    }
   }
 }

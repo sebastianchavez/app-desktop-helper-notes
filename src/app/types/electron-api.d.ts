@@ -11,6 +11,11 @@ import { AssistantRuntimeConfig } from '../models/assistant.model';
  */
 export interface ElectronAPI {
   platform: string;
+  wordClipboardExecute(command: 'copy' | 'cut' | 'paste' | 'pastePlain'): Promise<void>;
+  wordClipboardWriteImage(pngBase64: string): Promise<void>;
+  onWordClipboardCommand(
+    callback: (command: 'copy' | 'cut' | 'paste' | 'pastePlain') => void,
+  ): () => void;
 
   updatesGetState(): Promise<UpdateState>;
   updatesCheck(): Promise<UpdateState>;
@@ -25,6 +30,7 @@ export interface ElectronAPI {
   foldersGetAll(): Promise<Folder[]>;
   foldersCreate(name: string, parentId?: number | null): Promise<Folder>;
   foldersUpdate(id: number, name: string): Promise<Folder>;
+  foldersMove(id: number, parentId: number | null): Promise<Folder>;
   foldersDelete(id: number): Promise<{ success: boolean }>;
 
   // Notes
@@ -42,6 +48,8 @@ export interface ElectronAPI {
     },
   ): Promise<Note>;
   notesDelete(id: number): Promise<{ success: boolean }>;
+  /** Persiste el DOCX completo y devuelve metadatos sin el adjunto Base64. */
+  wordSave(noteId: number, base64: string): Promise<Omit<Note, 'file_data'>>;
 
   // Settings
   settingsGet(key: string): Promise<string | undefined>;
@@ -86,6 +94,14 @@ export interface ElectronAPI {
   fileImport(): Promise<
     { title: string; content: string; file_data?: string; file_type?: string }[]
   >;
+  fileSupportedExtensions: string[];
+  fileGetPath(file: File): string;
+  fileImportPaths(paths: string[]): Promise<{
+    files: { title: string; content: string; file_data?: string; file_type?: string }[];
+    errors: string[];
+  }>;
+  fileTakePendingOpen(): Promise<string[]>;
+  onFileOpenRequested(callback: () => void): () => void;
   fileImportJson(): Promise<
     { title: string; content: string; file_data?: string; file_type?: string }[]
   >;
@@ -102,15 +118,59 @@ export interface ElectronAPI {
   }): Promise<{ success: boolean; filePath?: string }>;
   xlsxParseData(base64: string): Promise<{
     success: boolean;
+    pivots?: import('../models/spreadsheet-pivot').SavedPivot[];
+    charts?: import('../models/spreadsheet-chart').SavedChart[];
     sheets?: {
       name: string;
       data: (string | number | boolean | null)[][];
       colCount: number;
-      formulas: { row: number; col: number; formula: string }[];
+      date1904?: boolean;
+      definedNames?: Record<string, string>;
+      formulas: {
+        row: number;
+        col: number;
+        formula: string;
+        arrayRange?: string;
+        dynamic?: boolean;
+      }[];
+      tables?: import('../models/spreadsheet-table').SpreadsheetTable[];
       merges?: { s: { r: number; c: number }; e: { r: number; c: number } }[];
       colWidths?: number[];
       rowHeights?: number[];
+      cellStyles?: Record<string, Record<string, string>>;
+      numberFormats?: Record<string, string>;
+      formattedCells?: Record<string, { value: string | number | boolean | null; text: string }>;
     }[];
+    error?: string;
+  }>;
+  xlsxChart(
+    base64: string,
+    action: 'preview' | 'save' | 'delete' | 'refresh',
+    definition?: import('../models/spreadsheet-chart').ChartDefinition,
+    id?: string,
+  ): Promise<{
+    success: boolean;
+    base64?: string;
+    data?: import('../models/spreadsheet-chart').ChartData;
+    chart?: import('../models/spreadsheet-chart').SavedChart;
+    warnings?: string[];
+    error?: string;
+  }>;
+  xlsxPivot(
+    base64: string,
+    action: 'preview' | 'save' | 'refresh',
+    definition?: import('../models/spreadsheet-pivot').PivotDefinition,
+  ): Promise<{
+    success: boolean;
+    base64?: string;
+    pivot?: import('../models/spreadsheet-pivot').SavedPivot;
+    warnings?: string[];
+    preview?: {
+      matrix: (string | number | boolean | null)[][];
+      matched: number;
+      rows: number;
+      columns: number;
+    };
     error?: string;
   }>;
   xlsxUpdateCell(
@@ -155,6 +215,7 @@ export interface ElectronAPI {
       formula: string;
     }[],
     merges: { s: { r: number; c: number }; e: { r: number; c: number } }[],
+    options?: import('../models/spreadsheet-format').SpreadsheetEditOptions,
   ): Promise<{
     success: boolean;
     base64?: string;
@@ -187,25 +248,19 @@ export interface ElectronAPI {
   windowSetFullScreen(enabled: boolean): Promise<{ success: boolean }>;
 
   // Ollama AI
-  llamaManagerStatus(
-    endpoint: string,
-  ): Promise<{
+  llamaManagerStatus(endpoint: string): Promise<{
     installed: boolean;
     running: boolean;
     executable?: string;
     models: { name: string; path: string; size: number }[];
   }>;
   llamaInstall(): Promise<{ success: boolean; path?: string; version?: string; error?: string }>;
-  llamaCatalog(
-    query: string,
-  ): Promise<{
+  llamaCatalog(query: string): Promise<{
     success: boolean;
     models: { id: string; downloads: number; likes: number; updatedAt: string }[];
     error?: string;
   }>;
-  llamaModelFiles(
-    repository: string,
-  ): Promise<{
+  llamaModelFiles(repository: string): Promise<{
     success: boolean;
     files: { name: string; size: number; quantization: string }[];
     error?: string;
@@ -219,9 +274,7 @@ export interface ElectronAPI {
   llamaStart(modelPath: string, endpoint: string): Promise<{ success: boolean; error?: string }>;
   llamaStop(): Promise<{ success: boolean; error?: string }>;
   aiStatus(config: AssistantRuntimeConfig): Promise<{ available: boolean; error?: string }>;
-  aiListModels(
-    config: AssistantRuntimeConfig,
-  ): Promise<{
+  aiListModels(config: AssistantRuntimeConfig): Promise<{
     success: boolean;
     models: { name: string; size: number; modified_at: string }[];
     error?: string;
@@ -261,9 +314,7 @@ export interface ElectronAPI {
       updated_at: string;
     }[]
   >;
-  conversationsGetById(
-    id: number,
-  ): Promise<
+  conversationsGetById(id: number): Promise<
     | {
         id: number;
         title: string;

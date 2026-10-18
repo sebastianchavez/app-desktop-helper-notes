@@ -1,0 +1,67 @@
+<header class="document-toolbar">
+  <span class="material-symbols-outlined document-icon">{{
+    note().file_type === 'docx' ? 'description' : 'text_snippet'
+  }}</span>
+  <input
+    type="text"
+    [value]="title()"
+    (input)="titleChange.emit($any($event.target).value)"
+    [attr.aria-label]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate"
+  />
+  @if (note().file_type === 'docx') {
+    <span class="save-state" role="status">{{
+      'DOCUMENT.STATE_' + sessions.state().toUpperCase() | translate
+    }}</span>
+    <button type="button" (click)="saveDocument()" [disabled]="loading() || failed()">
+      {{ 'DOCUMENT.SAVE_CHANGES' | translate }}
+    </button>
+  }
+  <button
+    type="button"
+    (click)="downloadDocument()"
+    [disabled]="note().file_type === 'docx' && (loading() || failed())"
+  >
+    {{ 'DOCUMENT.DOWNLOAD' | translate }}
+  </button>
+  <button type="button" (click)="printRequested.emit()" [disabled]="loading() || failed()">
+    {{ 'NOTE_EDITOR.PRINT' | translate }}
+  </button>
+</header>
+@if (note().file_type === 'docx') {
+  <div class="document-stage">
+    @if (clipboardError(); as message) {
+      <p class="document-status" role="alert">
+        {{ message | translate }}
+        <button
+          type="button"
+          (click)="clipboardError.set(null)"
+          [attr.aria-label]="'APP.DISMISS' | translate"
+        >
+          ×
+        </button>
+      </p>
+    }
+    @if (loading()) {
+      <p class="document-status" role="status">{{ 'DOCUMENT.LOADING' | translate }}</p>
+    }
+    @if (failed()) {
+      <p class="document-status" role="alert">{{ 'DOCUMENT.ERROR' | translate }}</p>
+    }
+    <div
+      #documentHost
+      class="word-host"
+      [attr.aria-busy]="loading()"
+      (keydown.control.s)="$event.preventDefault(); saveDocument()"
+      (keydown.meta.s)="$event.preventDefault(); saveDocument()"
+    ></div>
+  </div>
+} @else {
+  <textarea
+    class="plain-text"
+    spellcheck="false"
+    wrap="off"
+    [value]="text()"
+    (input)="textChange.emit($any($event.target).value)"
+    [attr.aria-label]="'DOCUMENT.PLAIN_TEXT' | translate"
+  ></textarea>
+}

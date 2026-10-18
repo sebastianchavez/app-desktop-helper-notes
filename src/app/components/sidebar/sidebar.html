@@ -26,7 +26,7 @@
             (click)="selectFolder(null)"
             (contextmenu)="openContextMenu($event, null)"
             (dragover)="onDragOver($event, null)"
-            (dragleave)="onDragLeave()"
+            (dragleave)="onDragLeave($event)"
             (drop)="onDrop($event, null)"
             [class]="(dragOverFolderId() === 'all'
               ? 'flex items-center gap-3 px-3 py-2 rounded-lg ring-2 ring-primary bg-primary/20 text-primary cursor-pointer'
@@ -59,8 +59,10 @@
                   (click)="selectFolder(folder.id)"
                   (dblclick)="startEditing(folder.id, folder.name)"
                   (contextmenu)="openContextMenu($event, folder.id)"
+                  draggable="true"
+                  (dragstart)="onFolderDragStart($event, folder.id)"
                   (dragover)="onDragOver($event, folder.id)"
-                  (dragleave)="onDragLeave()"
+                  (dragleave)="onDragLeave($event)"
                   (drop)="onDrop($event, folder.id)"
                   [style.padding-left.px]="8 + depth * 18"
                   [class]="(dragOverFolderId() === folder.id
@@ -118,7 +120,7 @@
       <button
         (click)="selectFolder(null)"
         (dragover)="onDragOver($event, null)"
-        (dragleave)="onDragLeave()"
+        (dragleave)="onDragLeave($event)"
         (drop)="onDrop($event, null)"
         [class]="(dragOverFolderId() === 'all'
           ? 'p-2 rounded-lg ring-2 ring-primary bg-primary/20 text-primary'
@@ -132,8 +134,10 @@
       @for (folder of noteService.folders(); track folder.id) {
         <button
           (click)="selectFolder(folder.id)"
+          draggable="true"
+          (dragstart)="onFolderDragStart($event, folder.id)"
           (dragover)="onDragOver($event, folder.id)"
-          (dragleave)="onDragLeave()"
+          (dragleave)="onDragLeave($event)"
           (drop)="onDrop($event, folder.id)"
           [class]="(dragOverFolderId() === folder.id
             ? 'p-2 rounded-lg ring-2 ring-primary bg-primary/20 text-primary'
@@ -146,6 +150,10 @@
         </button>
       }
     </div>
+    }
+
+    @if (moveError()) {
+      <p role="alert" class="text-sm text-red-500 px-2 py-2">{{ 'SIDEBAR.MOVE_ERROR' | translate }}</p>
     }
 
     <!-- Bottom -->

@@ -1,9 +1,24 @@
+@use './app/components/note-editor/xlsx-chart';
+@use './app/components/note-editor/xlsx-pivot';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+@import '@docx-editor.dev/core/styles/editor.css';
+
+/* El motor administra el contenido interior; Angular conserva el tamaño del panel. */
+.word-editor-mount {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.word-editor-mount .docx-editor {
+  height: 100%;
+  color: #111827;
+  font-family: Arial, sans-serif;
+}
 
 /* ── Color Theme Variables ── */
 :root,

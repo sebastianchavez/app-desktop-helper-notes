@@ -38,6 +38,10 @@
   },
   "private": true,
   "build": {
+    "afterPack": "scripts/edit-windows-executable.js",
+    "toolsets": {
+      "winCodeSign": "1.1.0"
+    },
     "appId": "com.schavez.helper-notes",
     "productName": "Helper Notes",
     "artifactName": "Helper-Notes-${version}-${os}-${arch}.${ext}",
@@ -57,6 +61,7 @@
     "npmRebuild": true,
     "extraResources": [],
     "win": {
+      "signAndEditExecutable": false,
       "target": "nsis",
       "icon": "assets/favicon.ico"
     },
@@ -88,6 +93,7 @@
       "synopsis": "Notas, documentos y asistencia local"
     },
     "nsis": {
+      "include": "build/file-associations.nsh",
       "oneClick": false,
       "perMachine": true,
       "allowToChangeInstallationDirectory": true
@@ -101,14 +107,20 @@
     "@angular/forms": "^21.1.0",
     "@angular/platform-browser": "^21.1.0",
     "@angular/router": "^21.1.0",
+    "@docx-editor.dev/core": "2.30.0",
+    "@docx-editor.dev/i18n": "2.30.0",
+    "@docx-editor.dev/vue": "2.30.0",
     "@ngx-translate/core": "^17.0.0",
     "@ngx-translate/http-loader": "^17.0.0",
+    "@xmldom/xmldom": "^0.9.12",
     "better-sqlite3": "^12.6.2",
+    "docx-preview": "^0.4.1",
     "dotenv": "^17.2.2",
     "fflate": "^0.8.3",
     "pptxgenjs": "^4.0.1",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
+    "vue": "3.5.44",
     "xlsx": "^0.18.5",
     "yauzl": "^3.4.0"
   },

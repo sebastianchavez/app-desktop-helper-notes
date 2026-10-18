@@ -34,6 +34,32 @@ export function updateFolder(id: number, name: string): FolderRow {
   return db.prepare('SELECT * FROM folders WHERE id = ?').get(id) as FolderRow;
 }
 
+/** Mueve una rama sin tocar su contenido y evita ciclos incluso por llamadas IPC directas. */
+export function moveFolder(id: number, parentId: number | null): FolderRow {
+  if (!Number.isSafeInteger(id) || id <= 0 ||
+      (parentId !== null && (!Number.isSafeInteger(parentId) || parentId <= 0))) {
+    throw new Error('Identificador de carpeta inválido.');
+  }
+  const db = getDb();
+  return db.transaction(() => {
+    const findFolder = db.prepare('SELECT * FROM folders WHERE id = ? AND deleted_at IS NULL');
+    const folder = findFolder.get(id) as FolderRow | undefined;
+    if (!folder) throw new Error('La carpeta no existe o fue eliminada.');
+    const visited = new Set<number>([id]);
+    let current = parentId;
+    while (current !== null) {
+      if (visited.has(current)) throw new Error('No se puede mover una carpeta dentro de sí misma o de sus subcarpetas.');
+      visited.add(current);
+      const parent = findFolder.get(current) as FolderRow | undefined;
+      if (!parent) throw new Error('La carpeta destino no existe o fue eliminada.');
+      current = parent.parent_id;
+    }
+    if (folder.parent_id === parentId) return folder;
+    db.prepare("UPDATE folders SET parent_id = ?, updated_at = datetime('now') WHERE id = ?").run(parentId, id);
+    return findFolder.get(id) as FolderRow;
+  })();
+}
+
 /**
  * Marca como eliminada una rama completa y todas sus notas en una transacción.
  * El CTE recursivo resuelve descendientes sin depender del árbol del renderer.

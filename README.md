@@ -10,6 +10,10 @@ Está desarrollada con Angular, Electron y SQLite. La información se guarda loc
 
 - Incluye un editor de hojas de cálculo dentro de la propia aplicación.
 - Importa archivos TXT, HTML, DOCX, PDF, XLSX, XLS, CSV y PPTX, además de respaldos JSON.
+- Al soltar documentos compatibles sobre cualquier zona de la aplicación, los importa en la carpeta activa y abre el último. Los originales permanecen intactos.
+- Los DOCX se editan directamente en páginas mediante DOCX Editor (núcleo Apache 2.0): texto, formato, imágenes, tablas, márgenes y orientación. Los cambios se guardan en el DOCX completo y «Guardar archivo» exporta la versión editada. No hace falta convertir el documento en una nota aparte.
+- TXT se abre como texto plano editable, conservando espacios, tabulaciones y saltos de línea. PDF usa el visor del archivo original y XLSX muestra fuentes, colores, bordes, celdas combinadas y valores formateados del libro importado.
+- El instalador de Windows agrega «Abrir con Helper Notes» al menú contextual y Helper Notes a «Abrir con» para TXT, HTML/HTM, DOCX, PDF, XLSX, XLS, CSV y PPTX. Las asociaciones se registran al instalar o actualizar y se retiran al desinstalar, sin cambiar la aplicación predeterminada.
 - Exporta notas como TXT, HTML, DOCX, PPTX, PDF, XLSX o JSON.
 - Imprime notas, PDF, la hoja de cálculo activa y presentaciones mediante el diálogo nativo (`Ctrl+P`).
 - Integra modelos locales de Ollama que pueden conversar sobre la nota abierta y proponer cambios.
@@ -63,6 +67,14 @@ Está desarrollada con Angular, Electron y SQLite. La información se guarda loc
 - Descargar el libro como XLSX o XLS, o exportar la hoja activa como CSV.
 
 El evaluador integrado cubre fórmulas simples y referencias dentro de la hoja activa; no pretende sustituir todavía el motor completo de Microsoft Excel. Al abrir el archivo exportado, Excel, LibreOffice u otra aplicación compatible puede recalcular las fórmulas OOXML conservadas.
+
+### Edición de documentos Word
+
+- El motor DOCX funciona localmente en el renderer; se carga al abrir un Word y no requiere servidor, cuentas ni servicios externos. Se incluyen únicamente `@docx-editor.dev/core`, `vue` e `i18n`, bajo Apache 2.0, y Vue bajo MIT. No incluye SuperDoc ni paquetes Pro. Los avisos de licencia se distribuyen en `assets/licenses/word-editor`.
+- El guardado automático espera 700 ms después de editar, serializa las revisiones y actualiza el binario y el texto de búsqueda juntos. Cambiar de nota termina el guardado de la sesión anterior antes de liberar su motor. Un fallo conserva la sesión para reintentar y muestra un aviso global; el cierre de la ventana se bloquea mientras quedan cambios por confirmar.
+- Los rectángulos VML simples anclados a página se convierten en imágenes/cuadros DrawingML editables manteniendo coordenadas, dimensiones, relaciones e imágenes. Esta preparación ocurre en memoria; abrir sin editar no reemplaza el adjunto. Las formas antiguas fuera de ese subconjunto permanecen intactas.
+- El soporte no equivale a todas las funciones de Microsoft Office: SmartArt, gráficos avanzados, formas agrupadas/rotadas y algunos cuadros en encabezados o con tablas pueden conservarse sin poder editarse. La fidelidad de fuentes y funciones avanzadas debe comprobarse con documentos representativos. Consulta la [matriz del motor](https://www.docx-editor.dev/docs/2.x/word-fidelity).
+- `tests/electron-word-editor.cjs` comprueba escritura real, guardado SQLite, reapertura, exportación y conservación de imágenes en un perfil aislado. Acepta una ruta DOCX opcional para QA local; no modifica el archivo de entrada ni lo añade al repositorio.
 
 ### Presentaciones
 
@@ -249,6 +261,8 @@ Otros comandos útiles:
 | `npm test -- --watch=false` | Ejecuta las pruebas una vez. |
 
 Las salidas se separan en `release/linux-<arquitectura>/` y `release/mac-<arquitectura>/`. El workflow `.github/workflows/build-desktop.yml` ejecuta estas compilaciones en runners nativos al publicar una etiqueta `v*` o manualmente desde GitHub Actions.
+
+La compilación de Windows usa el paquete RCEdit exclusivo de Windows de `win-codesign@1.1.0` para conservar el icono y las versiones del ejecutable. El hook `scripts/edit-windows-executable.js` reemplaza la edición heredada de electron-builder, evitando extraer los enlaces simbólicos de macOS incluidos en `winCodeSign-2.6.0`. El script no cierra otras aplicaciones y ejecuta las herramientas locales con el mismo runtime de Node que inició la compilación.
 | `npx ng test` | Ejecuta las pruebas unitarias con Vitest. |
 
 ## Estructura del proyecto
@@ -275,6 +289,75 @@ helper-notes-app-desktop/
 ├── angular.json
 └── package.json
 ```
+
+## Edición de hojas de cálculo
+
+El editor permite combinar/separar celdas (conserva los valores cubiertos), combinar y centrar, ajustar texto, cambiar colores y formatos numéricos, insertar/eliminar/mover filas y columnas, ordenar filas completas, copiar fórmulas con referencias relativas/absolutas y deshacer/rehacer. Los cambios de formato se guardan en el XLSX y sobreviven al reabrirlo.
+
+El parser local admite operadores, funciones anidadas, referencias entre hojas, detección de ciclos y funciones de agregación, lógica, texto, criterios y búsqueda (`SUM`, `AVERAGE`, `IF`, `IFERROR`, `COUNTIF`, `SUMIF`, `VLOOKUP`, `INDEX`, `MATCH`, entre otras). Acepta alias españoles y punto y coma; guarda nombres ingleses y comas de OOXML. Conserva el resultado importado de funciones desconocidas y solicita recálculo al abrir en Excel/Calc; no calcula todas las funciones de Office. No implementa macros ni todas las funciones avanzadas de una suite como FreeOffice.
+
+`electron/spreadsheet-edit.ts` modifica datos, combinaciones y estilos dentro del ZIP original, conservando los recursos y relaciones restantes. `src/app/models/spreadsheet-formula.ts` contiene el cálculo seguro, sin ejecutar JavaScript de las fórmulas. `tests/electron-spreadsheet.cjs` verifica los controles reales y la reapertura con SQLite en un perfil aislado; no utiliza documentos ni portapapeles del usuario.
+
+### Fórmulas y compatibilidad ampliadas
+
+El catálogo de cálculo local incluye funciones matriciales, además de SUMIFS/COUNTIFS/AVERAGEIFS, AVERAGEIF, MINIFS/MAXIFS, SUMPRODUCT, XLOOKUP/XMATCH, IFNA/IFS/SWITCH, inspección de errores/tipos, estadísticas muestrales/poblacionales y más operaciones de texto. Se aceptan alias españoles (por ejemplo, `SUMAR.SI.CONJUNTO`, `BUSCARX`, `SI.CONJUNTO` y `UNIRCADENAS`) y nombres ingleses; las sugerencias incluyen firmas y descripciones. Las condiciones admiten comodines `*`/`?` y escape `~`; la igualdad normal de operadores no trata el texto como patrón. Las búsquedas aproximadas de MATCH/VLOOKUP y la precedencia de signos/potencias siguen las [reglas de cálculo de Excel](https://support.microsoft.com/es-es/excel/calculation-operators-and-precedence-in-excel).
+
+DATE, YEAR/MONTH/DAY, TODAY/NOW, DAYS, EDATE/EOMONTH, WEEKDAY, TIME/HOUR/MINUTE/SECOND y WORKDAY/NETWORKDAYS calculan seriales con la [época 1900 o 1904 del libro](https://support.microsoft.com/en-us/excel/date-systems-in-excel), incluyendo el día ficticio 29/02/1900. Las fechas y horas conservan su formato original; para una fórmula nueva se puede elegir el formato de fecha de la barra. WORKDAY y NETWORKDAYS usan lunes–viernes y feriados opcionales, con un límite de 100000 días recorridos.
+
+Se resuelven nombres definidos simples de celdas/rangos A1, constantes y expresiones escalares, con prioridad de nombres locales sobre globales y detección de ciclos. Se conserva su definición en el archivo. Las funciones modernas conservan o reciben prefijos OOXML `_xlfn.` al guardar. Las tablas dinámicas conservan el último resultado y muestran un aviso si una medida numérica de su origen contiene errores. Los errores de fórmulas se exportan como errores nativos; los errores importados sin fórmula no se convierten en texto. Las fórmulas matriciales no soportadas conservan sus atributos si la expresión no cambia.
+
+Una fórmula importada que el parser o el catálogo no pueda interpretar conserva su expresión y su resultado importado, y muestra un aviso de posible desactualización. Una expresión nueva o modificada no reutiliza el resultado de otra fórmula. El archivo solicita recálculo completo en Excel/Calc al abrirlo.
+
+El motor sigue siendo un subconjunto: no calcula vínculos externos, fórmulas 3D ni macros. XLOOKUP puede devolver una fila o columna de resultados; XLOOKUP/XMATCH calculan búsquedas lineales de principio a fin o al revés (modos 1/-1), con coincidencia exacta, aproximada o comodines; no implementan búsqueda binaria. Los rangos evaluados se limitan a 100000 celdas. Los nombres importados no tienen todavía un administrador de edición ni traducción de referencias relativas/estructuradas; sus definiciones se conservan tal como se importan. No se garantiza equivalencia con todas las reglas regionales o funciones de Office.
+
+La lógica está separada entre `spreadsheet-formula.ts` (parser/dependencias por referencia), `spreadsheet-function-library.ts` (funciones adicionales), `spreadsheet-date.ts` (seriales y calendario) y `spreadsheet-formula-catalog.ts` (ayuda). Las pruebas de modelos y `tests/spreadsheet-compatibility.test.ts` cubren cálculo y conservación del paquete; `tests/electron-formula.cjs` verifica controles reales, fórmulas localizadas, nombres locales/globales, época 1904, errores nativos, cachés y reapertura en SQLite aislado.
+
+### Matrices dinámicas, tablas y rangos completos
+
+`FILTRAR/FILTER`, `ORDENAR/SORT`, `UNICOS/UNIQUE`, `SECUENCIA/SEQUENCE` y `TRANSPONER/TRANSPOSE` devuelven matrices desde una celda ancla. Los operadores comparan y calculan rangos por elemento; FILTER acepta máscaras combinadas y un resultado alternativo si no hay coincidencias. IF/IFERROR y XLOOKUP admiten resultados matriciales en el subconjunto implementado. `A1#` referencia el desbordamiento completo y se guarda mediante `_xlfn.ANCHORARRAY`.
+
+El cálculo por dependencias protege celdas ocupadas, combinaciones y tablas. Si el resultado no cabe, el ancla muestra `#SPILL!` y no reemplaza los datos existentes; al quitar el obstáculo se recalcula. Los resultados derivados están marcados y protegidos: se modifica la fórmula de origen. Reducir o eliminar la fórmula limpia sus antiguos resultados, y deshacer/rehacer restaura expresión y estructura. Los resultados de funciones dinámicas externas aún no soportadas se conservan completos con un aviso.
+
+Las tablas nativas importadas y nuevas se resuelven por nombre y columnas: `Ventas[Importe]`, `Ventas[[Importe]:[Unidades]]`, `[@Importe]`, `#Data`, `#Headers`, `#Totals`, `#All` y `#This Row`. **Crear tabla** usa la selección como rango inicial; **Redimensionar tabla** permite editar nombre, tamaño y fila de totales. Hay suma, promedio, conteo de valores/números, mínimo, máximo y desviación/varianza muestral o poblacional por columna. El rango incluye encabezados y totales. Los destinos ocupados para una nueva fila de totales se rechazan antes de modificar datos.
+
+La creación genera partes, relaciones, estilos y tipos de contenido nativos XLSX. Renombrar tablas o encabezados actualiza referencias explícitas e implícitas en fórmulas y nombres definidos, sin modificar literales. Los identificadores estables de tabla/columna conservan fórmulas calculadas y filtros válidos; las fórmulas de columna también se guardan como metadatos nativos. Se pueden insertar/eliminar filas de datos y columnas, mover bloques completos y ordenar los datos de una tabla sin mover sus encabezados, totales ni celdas externas. Las filas calculadas nuevas vacías heredan su fórmula. Reducir el rango conserva las celdas externas; desplazar una fila de totales limpia sólo su posición anterior. Se rechazan tablas partidas, eliminación parcial de encabezados y pérdida de todas las filas de datos. Para quitar totales se usa su casilla. Se admiten hasta 100.000 celdas por tabla; las uniones estructuradas no contiguas y varios selectores combinados siguen pendientes.
+
+Las hojas con matrices calculables permiten insertar, eliminar y mover filas o columnas: se limpian sólo resultados derivados, se remapean fórmulas/nombres y se regeneran las matrices. Eliminar un ancla elimina su matriz; encontrar datos en el desbordamiento produce `#SPILL!` sin sobrescribirlos. Ordenar filas que atraviesan una matriz se rechaza; usa `ORDENAR` o modifica su origen. Las matrices importadas con funciones no calculables conservan su protección estructural.
+
+Al borrar extremos de rangos, sus referencias se contraen a las celdas supervivientes, preservando signos absolutos y nombres de hoja; un rango eliminado completamente produce `#REF!`. Esto incluye columnas/filas completas, que mantienen independencia del otro eje.
+
+Se añaden 20 funciones: `SUBTOTAL`, `PMT`, `PV`, `FV`, `NPER`, `IPMT`, `PPMT`, `NPV`, `MROUND`, `LN`, `LOG10`, `LOG`, `EXP`, `FACT`, `GCD`, `LCM`, `T`, `NUMBERVALUE`, `TEXTBEFORE` y `TEXTAFTER`, con alias españoles y ayuda contextual. Las funciones modernas mantienen sus prefijos OOXML y las alternativas de texto se evalúan sólo cuando hacen falta. `SUBTOTAL` implementa los códigos 1–11/101–111 y evita subtotales anidados; los códigos 101–111 usan las filas ocultas importadas. Con filtros activos, el archivo no distingue siempre ocultación manual/filtrada: los códigos 1–11 conservan el resultado importado y muestran el aviso de cálculo pendiente. Este editor aún no reaplica filtros avanzados ni incorpora todas las funciones de Office. La semántica de subtotales sigue la [documentación de Microsoft](https://support.microsoft.com/en-us/excel/functions/subtotal-function).
+
+Las cachés de tablas dinámicas importadas cuyo origen es el nombre de una tabla conservan esa vinculación al renombrarla; se solicita su actualización al abrir en Excel. El cálculo local de esos orígenes por nombre sigue pendiente; las tablas dinámicas creadas por Helper Notes mantienen su actualización por rango.
+
+`tests/electron-tables.cjs` verifica creación, nombres, encabezados, IDs, totales, desplazamiento de totales, columnas calculadas, inserciones, eliminación de columnas, ordenación sin afectar celdas externas, protección de encabezados, deshacer y reapertura en una base SQLite aislada.
+
+
+El guardado escribe `f t="array"`, los rangos resultantes y metadata nativa XLDAPR, reutilizando sus registros y conservando metadatos ajenos. No necesita servicios externos. Los detalles siguen la [documentación oficial de matrices y desbordamientos de Excel](https://support.microsoft.com/en-US/Excel/dynamic-array-formulas-and-spilled-array-behavior) y la estructura [DynamicArrayProperties de Open XML](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.office2019.excel.dynamicarray.dynamicarrayproperties?view=openxml-3.0.1).
+
+`spreadsheet-array.ts` administra matrices y rangos compactos, `spreadsheet-workbook.ts` dependencias/propietarios, `spreadsheet-table.ts` referencias estructuradas y `electron/spreadsheet-structure.ts` la estructura nativa. Las pruebas incluyen un XLSX sintético de XlsxWriter como productor independiente (`tests/fixtures/dynamic-source.xlsx`), verificación del XML y `tests/electron-dynamic.cjs` para editar, bloquear, desbloquear, reducir y reabrir resultados en un perfil aislado.
+
+### Tablas dinámicas
+
+El botón **Tabla dinámica** abre el configurador sobre el rango seleccionado (primera fila = encabezados). Con una sola celda seleccionada se propone el rango usado de la hoja. Permite hasta cinco niveles de filas, tres de columnas y ocho valores, con suma, conteo de valores, conteo numérico, promedio, mínimo y máximo. Los filtros comparan un valor tipado por campo. Los totales se calculan desde los registros originales, incluyendo los promedios, y se puede consultar una vista previa antes de guardar.
+
+Cada tabla obtiene una hoja de resultado propia. **Editar campos** modifica su configuración sin duplicarla; **Actualizar tablas dinámicas** fuerza el recálculo, que también ocurre al guardar cambios en el origen. El resultado calculado se protege contra edición directa de valores. Si el origen queda inválido, se conserva el último resultado y se muestra un aviso; el rango de origen sigue siendo el rango A1 explícito configurado y puede ajustarse desde el panel.
+
+`electron/spreadsheet-pivot.ts` escribe las partes `pivotTableDefinition`, `pivotCacheDefinition` y `pivotCacheRecords` y sus relaciones, siguiendo la [estructura de tablas dinámicas de SpreadsheetML](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/working-with-pivottables). La exportación XLSX conserva el paquete completo; XLS y CSV son conversiones de valores y no conservan tablas dinámicas nativas. Las tablas creadas aquí pueden reabrirse y editarse; las tablas externas con configuraciones avanzadas se conservan, pero su edición aún no está implementada. No hay agrupación de fechas, campos calculados, segmentadores, DAX ni orígenes OLAP.
+
+Las pruebas de cálculo/caché están en `tests/spreadsheet-pivot.test.ts`; `tests/electron-pivot.cjs` comprueba el flujo real con SQLite aislado, la actualización del origen, la reapertura y la conservación de las partes nativas al exportar.
+
+### Gráficos
+
+**Insertar gráfico** propone el rango seleccionado; con una sola celda usa el área ocupada. El configurador permite columnas, barras, líneas, áreas, circular, anillo y dispersión XY, categorías, hasta doce series, títulos de ejes, colores, leyenda, etiquetas y series apiladas en columnas/barras/áreas. Una vista previa permite comprobar la selección antes de guardar. Circular y anillo usan una sola serie no negativa; dispersión requiere X numérico. Los huecos se conservan y las cadenas no se convierten silenciosamente en números.
+
+Los gráficos aparecen sobre la hoja: arrastrar el encabezado los mueve; arrastrar la esquina inferior cambia su tamaño. El botón de edición permite introducir ancho/alto y modificar la configuración; eliminar un gráfico conserva sus celdas. Creación, edición, posición y eliminación participan en deshacer/rehacer. Se actualizan al guardar cambios de datos, fórmulas o tablas dinámicas.
+
+`electron/spreadsheet-chart.ts` escribe partes nativas DrawingML/ChartML con referencias absolutas y cachés, según la [estructura de gráficos de SpreadsheetML](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/how-to-insert-a-chart-into-a-spreadsheet). Conserva las imágenes y dibujos restantes. XLSX exporta el paquete original completo; XLS/CSV no conservan gráficos. El renderizador SVG local no requiere servicios externos ni nuevas licencias de motor.
+
+Se pueden leer y editar gráficos básicos externos con series de columnas contiguas en filas y un único origen. El guardado ordinario conserva su XML original; editar explícitamente uno aplica las opciones soportadas por este editor. Combinados, 3D, ejes secundarios y otros tipos avanzados se conservan dentro del archivo, pero no se renderizan ni editan todavía. El rango A1 es explícito: si cambia la estructura o crece la tabla, debe ajustarse en el configurador. Límites: 50 gráficos editables por libro, 3000 filas por rango y 12000 puntos por gráfico; se simplifican etiquetas/leyenda en vistas densas para evitar superposición.
+
+`tests/spreadsheet-chart.test.ts` verifica XML, referencias, cachés, validación y conservación de tablas dinámicas. `spreadsheet-chart-view.spec.ts` verifica negativos, huecos, anillos, apilados y escala XY. `tests/electron-chart.cjs` comprueba los controles reales, arrastre, tamaño, actualización, reapertura, eliminación y exportación con un perfil SQLite aislado. Los siete tipos se verificaron además con lectura y reescritura mediante openpyxl.
 
 ## Autor y licencia
 

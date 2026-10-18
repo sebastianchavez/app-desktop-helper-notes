@@ -66,6 +66,30 @@ export class NoteService {
     await this.loadFolders();
   }
 
+  /** Comprueba destinos disponibles y evita ciclos y movimientos sin cambios. */
+  canMoveFolder(id: number, parentId: number | null): boolean {
+    const foldersById = new Map(this.folders().map((folder) => [folder.id, folder]));
+    const folder = foldersById.get(id);
+    if (!folder || folder.parent_id === parentId) return false;
+    const visited = new Set<number>([id]);
+    let current = parentId;
+    while (current !== null) {
+      if (visited.has(current)) return false;
+      visited.add(current);
+      const parent = foldersById.get(current);
+      if (!parent) return false;
+      current = parent.parent_id;
+    }
+    return true;
+  }
+
+  /** Persiste el nuevo padre conservando la selección y el contenido de la rama. */
+  async moveFolder(id: number, parentId: number | null): Promise<void> {
+    if (!this.canMoveFolder(id, parentId)) return;
+    await this.api.foldersMove(id, parentId);
+    await this.loadFolders();
+  }
+
   /**
    * Elimina una carpeta y limpia la selección si estaba dentro de la rama
    * eliminada. El conjunto `deletedIds` reproduce en memoria el borrado en
@@ -77,7 +101,11 @@ export class NoteService {
     while (changed) {
       changed = false;
       for (const folder of this.folders()) {
-        if (folder.parent_id !== null && deletedIds.has(folder.parent_id) && !deletedIds.has(folder.id)) {
+        if (
+          folder.parent_id !== null &&
+          deletedIds.has(folder.parent_id) &&
+          !deletedIds.has(folder.id)
+        ) {
           deletedIds.add(folder.id);
           changed = true;
         }
@@ -118,7 +146,7 @@ export class NoteService {
     // Must separate the two sets into different microtasks so Angular
     // detects a real change (null → id) instead of batching id → null → id.
     this.selectedNoteId.set(null);
-    await new Promise<void>(r => setTimeout(r));
+    await new Promise<void>((r) => setTimeout(r));
     this.selectedNoteId.set(id);
   }
 
@@ -167,6 +195,19 @@ export class NoteService {
     await this.loadNotes();
   }
 
+  /**
+   * Persiste una exportación Word sin cambiar la selección ni reconstruir el editor.
+   * @param id Identificador del documento editado.
+   * @param base64 DOCX completo exportado por el motor de edición.
+   * @returns Promesa resuelta después de confirmar la escritura y actualizar el listado.
+   */
+  async saveWord(id: number, base64: string): Promise<void> {
+    const metadata = await this.api.wordSave(id, base64);
+    this.notes.update((notes) =>
+      notes.map((note) => (note.id === id ? { ...note, ...metadata } : note)),
+    );
+  }
+
   /** Elimina una nota y limpia la selección cuando corresponde. */
   async deleteNote(id: number): Promise<void> {
     await this.api.notesDelete(id);
@@ -187,21 +228,52 @@ export class NoteService {
     }
   }
 
-  /** Importa archivos físicos admitidos y devuelve cuántas notas fueron creadas. */
+  /**
+   * Abre el diálogo nativo, importa sus documentos y selecciona el último.
+   * @returns Cantidad de notas creadas; cero al cancelar. No recibe parámetros.
+   */
   async importNotes(): Promise<number> {
     const files = await this.api.fileImport();
+    return this.saveImportedDocuments(files);
+  }
+
+  /**
+   * Importa archivos físicos y selecciona el último documento creado.
+   * @param paths Rutas absolutas de documentos recibidos desde Electron.
+   * @returns Cantidad importada y errores individuales de lectura o conversión.
+   */
+  async importPaths(paths: string[]): Promise<{ count: number; errors: string[] }> {
+    const folderId = this.selectedFolderId();
+    const result = await this.api.fileImportPaths(paths);
+    const count = await this.saveImportedDocuments(result.files, folderId);
+    return { count, errors: result.errors };
+  }
+
+  /**
+   * Persiste documentos convertidos y abre el último en su carpeta de destino.
+   * @param files Documentos convertidos; los adjuntos binarios vienen en Base64.
+   * @param folderId Carpeta capturada al iniciar la importación; `null` corresponde al nivel principal.
+   * @returns Cantidad de documentos creados y selecciona el último tras recargar el listado.
+   */
+  private async saveImportedDocuments(
+    files: { title: string; content: string; file_data?: string; file_type?: string }[],
+    folderId = this.selectedFolderId(),
+  ): Promise<number> {
     if (!files || files.length === 0) return 0;
 
     let lastNoteId: number | null = null;
     for (const file of files) {
-      const note = await this.api.notesCreate(this.selectedFolderId(), file.title);
-      const updateData: { content: string; file_data?: string; file_type?: string } = { content: file.content };
+      const note = await this.api.notesCreate(folderId, file.title);
+      const updateData: { content: string; file_data?: string; file_type?: string } = {
+        content: file.content,
+      };
       if (file.file_data) updateData.file_data = file.file_data;
       if (file.file_type) updateData.file_type = file.file_type;
       await this.api.notesUpdate(note.id, updateData);
       lastNoteId = note.id;
     }
 
+    this.selectedFolderId.set(folderId);
     await this.loadNotes();
     if (lastNoteId !== null) {
       this.selectedNoteId.set(lastNoteId);
@@ -217,7 +289,9 @@ export class NoteService {
     let lastNoteId: number | null = null;
     for (const file of files) {
       const note = await this.api.notesCreate(this.selectedFolderId(), file.title);
-      const updateData: { content: string; file_data?: string; file_type?: string } = { content: file.content };
+      const updateData: { content: string; file_data?: string; file_type?: string } = {
+        content: file.content,
+      };
       if (file.file_data) updateData.file_data = file.file_data;
       if (file.file_type) updateData.file_type = file.file_type;
       await this.api.notesUpdate(note.id, updateData);

@@ -86,4 +86,22 @@ describe('NoteService', () => {
     expect(document.kind).toBe('helper-notes-presentation');
     expect(document.slides).toHaveLength(1);
   });
+
+  it('imports an attachment into the captured folder and opens the resulting note', async () => {
+    const service = TestBed.inject(NoteService);
+    service.selectedFolderId.set(4);
+    window.electronAPI.fileImportPaths = async () => {
+      service.selectedFolderId.set(9);
+      return {
+        files: [{ title: 'Report', content: '', file_data: 'cGRm', file_type: 'pdf' }],
+        errors: ['missing.txt'],
+      };
+    };
+    const result = await service.importPaths(['C:\\documents\\report.pdf']);
+    expect(createdInFolder).toBe(4);
+    expect(lastUpdate).toEqual({ content: '', file_data: 'cGRm', file_type: 'pdf' });
+    expect(service.selectedFolderId()).toBe(4);
+    expect(service.selectedNoteId()).toBe(21);
+    expect(result).toEqual({ count: 1, errors: ['missing.txt'] });
+  });
 });

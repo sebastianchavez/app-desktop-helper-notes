@@ -2,7 +2,8 @@
   "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
   "version": 1,
   "cli": {
-    "packageManager": "npm"
+    "packageManager": "npm",
+    "analytics": false
   },
   "newProjectRoot": "projects",
   "projects": {
@@ -21,6 +22,11 @@
           "builder": "@angular/build:application",
           "options": {
             "browser": "src/main.ts",
+            "define": {
+              "__VUE_OPTIONS_API__": "true",
+              "__VUE_PROD_DEVTOOLS__": "false",
+              "__VUE_PROD_HYDRATION_MISMATCH_DETAILS__": "false"
+            },
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "allowedCommonJsDependencies": ["jszip"],
@@ -30,9 +36,7 @@
                 "input": "public"
               }
             ],
-            "styles": [
-              "src/styles.scss"
-            ]
+            "styles": ["src/styles.scss"]
           },
           "configurations": {
             "production": {

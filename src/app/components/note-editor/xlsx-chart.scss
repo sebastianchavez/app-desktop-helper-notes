@@ -1,0 +1,115 @@
+.xlsx-grid-container {
+  position: relative;
+}
+.xlsx-chart-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 3px 10px;
+  border-bottom: 1px solid #cbd5e1;
+}
+.xlsx-app .xlsx-chart-toolbar .xlsx-tb-btn {
+  width: auto;
+  height: auto;
+  min-height: 28px;
+  gap: 6px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.xlsx-chart-object {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #94a3b8;
+  background: white;
+  color: #0f172a;
+  box-shadow: 0 3px 12px #0002;
+  min-width: 280px;
+  min-height: 200px;
+  &.selected,
+  &:focus-within {
+    border: 2px solid #2563eb;
+  }
+}
+.xlsx-chart-handle {
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  cursor: move;
+  background: #eff6ff;
+  font-size: 12px;
+  user-select: none;
+  span {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  button {
+    cursor: pointer;
+    min-width: 25px;
+    font-size: 18px;
+  }
+}
+.xlsx-chart-canvas {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  p {
+    padding: 20px;
+    color: #b91c1c;
+  }
+}
+.xlsx-chart-resize {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  color: #2563eb;
+  font-size: 14px;
+}
+.xlsx-chart-panel {
+  .chart-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+  }
+  input[type='checkbox'] {
+    width: auto;
+  }
+  .chart-colors {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    input[type='color'] {
+      width: 30px;
+      height: 28px;
+      padding: 2px;
+    }
+  }
+}
+.chart-modal-preview {
+  width: 100%;
+  height: 360px;
+  min-width: 0;
+  background: white;
+}
+
+.xlsx-formula-compatibility {
+  padding: 8px 12px;
+  background: #fef3c7;
+  color: #78350f;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.xlsx-spill-cell {
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.35);
+}

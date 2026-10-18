@@ -5,6 +5,8 @@ import { initDb } from './db/db';
 import { registerIpcHandlers } from './ipc-handlers';
 import { UpdateManager } from './update-manager';
 import { applicationIconPath } from './platform-assets';
+import { queueOpenFiles } from './file-open';
+import { showWordClipboardMenu } from './word-context-menu';
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -79,7 +81,11 @@ function createWindow() {
   win.setMenu(null);
 
   // Menú contextual nativo (clic derecho: copiar, cortar, pegar, etc.)
-  win.webContents.on('context-menu', (_event, params) => {
+  win.webContents.on('context-menu', async (_event, params) => {
+    const targetWindow = win;
+    if (!targetWindow || targetWindow.isDestroyed()) return;
+    if (await showWordClipboardMenu(targetWindow, params.x, params.y)) return;
+    if (targetWindow.isDestroyed()) return;
     const menuTemplate: Electron.MenuItemConstructorOptions[] = [];
 
     if (params.isEditable) {
@@ -138,11 +144,23 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  queueOpenFiles(process.argv.slice(app.isPackaged ? 1 : 2));
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault();
+    if (queueOpenFiles([filePath]) && win) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send('file:openRequested');
+    }
+  });
+  app.on('second-instance', (_event, argv, workingDirectory) => {
+    const hasFiles = queueOpenFiles(argv.slice(app.isPackaged ? 1 : 2), workingDirectory);
     if (win) {
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
+      if (hasFiles) win.webContents.send('file:openRequested');
     }
   });
 

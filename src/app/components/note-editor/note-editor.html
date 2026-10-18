@@ -1,260 +1,22 @@
 <main class="flex-1 flex flex-col bg-white dark:bg-background-dark h-full min-w-0">
   @if (noteService.selectedNote(); as note) {
-    @if (note.file_type === 'pdf') {
-    <!-- PDF Viewer Mode -->
-    <div class="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex-shrink-0">
-      <span class="material-symbols-outlined text-xl text-red-500">picture_as_pdf</span>
-      <input
-        class="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-1 min-w-0 bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-primary/50 rounded px-1 truncate placeholder-slate-300 dark:placeholder-slate-600"
-        type="text"
-        [placeholder]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate"
-        [value]="title()"
-        (input)="onTitleChange($any($event.target).value)"
+    @if (note.file_type === 'docx' || note.file_type === 'txt') {
+      <app-imported-document
+        [note]="note"
+        [title]="title()"
+        [text]="content()"
+        (titleChange)="onTitleChange($event)"
+        (textChange)="onPlainTextChange($event)"
+        (printRequested)="printCurrentDocument()"
       />
-      <!-- AI Chat toggle -->
-      <button
-        class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-primary transition-colors"
-        [title]="'NOTE_EDITOR.AI_ASSISTANT' | translate"
-        (click)="aiChatToggle.emit()"
+    } @else if (note.file_type === 'pdf') {
+      <!-- PDF Viewer Mode -->
+      <div
+        class="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex-shrink-0"
       >
-        <span class="material-symbols-outlined text-base">smart_toy</span>
-      </button>
-      <button
-        class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary hover:bg-primary/90 text-white transition-colors"
-        (click)="downloadPdf()"
-      >
-        <span class="material-symbols-outlined text-sm">download</span>
-        {{ 'NOTE_EDITOR.DOWNLOAD_PDF' | translate }}
-      </button>
-      <button
-        class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
-        [disabled]="printing()"
-        [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate"
-        (click)="printCurrentDocument()"
-      >
-        <span class="material-symbols-outlined text-sm">print</span>
-        {{ 'NOTE_EDITOR.PRINT' | translate }}
-      </button>
-    </div>
-    <div class="flex-1 overflow-hidden">
-      @if (pdfUrl()) {
-        <embed [src]="pdfUrl()!" type="application/pdf" class="w-full h-full" />
-      } @else {
-        <div class="flex-1 flex items-center justify-center h-full">
-          <div class="text-center text-slate-400">
-            <span class="material-symbols-outlined text-5xl mb-3 block animate-pulse">picture_as_pdf</span>
-            <p class="text-sm">{{ 'NOTE_EDITOR.LOADING_PDF' | translate }}</p>
-          </div>
-        </div>
-      }
-    </div>
-    } @else if (note.file_type === 'pptx') {
-    <!-- Presentation Editor Mode -->
-    <div class="ppt-app">
-      <header class="ppt-ribbon-shell">
-        <div class="ppt-topbar">
-          <span class="material-symbols-outlined text-orange-500">slideshow</span>
-          <input class="ppt-title-input" type="text" [placeholder]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate" [value]="title()" (input)="onTitleChange($any($event.target).value)" />
-          <button class="ppt-toolbar-btn" [title]="'NOTE_EDITOR.AI_ASSISTANT' | translate" (click)="aiChatToggle.emit()"><span class="material-symbols-outlined">smart_toy</span></button>
-          <button class="ppt-action-btn ppt-present-btn" (click)="startPresentation(true)"><span class="material-symbols-outlined">play_arrow</span>{{ 'NOTE_EDITOR.PPT_PRESENT' | translate }}</button>
-          <button class="ppt-action-btn" [disabled]="printing()" [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate" (click)="printCurrentDocument()"><span class="material-symbols-outlined">print</span>{{ 'NOTE_EDITOR.PRINT' | translate }}</button>
-          <button class="ppt-action-btn" [disabled]="presentationExporting()" (click)="downloadPresentationFile()"><span class="material-symbols-outlined">download</span>{{ 'NOTE_EDITOR.PPT_EXPORT' | translate }}</button>
-        </div>
-
-        <nav class="ppt-ribbon-tabs" aria-label="Herramientas de presentación">
-          <button [class.active]="activePresentationRibbonTab() === 'home'" (click)="activePresentationRibbonTab.set('home')">Inicio</button>
-          <button [class.active]="activePresentationRibbonTab() === 'insert'" (click)="activePresentationRibbonTab.set('insert')">Insertar</button>
-          <button [class.active]="activePresentationRibbonTab() === 'design'" (click)="activePresentationRibbonTab.set('design')">Diseño</button>
-          <button [class.active]="activePresentationRibbonTab() === 'transitions'" (click)="activePresentationRibbonTab.set('transitions')">Transiciones</button>
-          <button [class.active]="activePresentationRibbonTab() === 'animations'" (click)="activePresentationRibbonTab.set('animations')">Animaciones</button>
-          <button [class.active]="activePresentationRibbonTab() === 'slideshow'" (click)="activePresentationRibbonTab.set('slideshow')">Presentación</button>
-        </nav>
-
-        <div class="ppt-ribbon">
-          @if (activePresentationRibbonTab() === 'home') {
-            <div class="ppt-ribbon-group">
-              <button class="ppt-ribbon-command primary" (click)="addPresentationSlide()"><span class="material-symbols-outlined">add_box</span><small>Nueva diapositiva</small></button>
-              <button class="ppt-ribbon-command" (click)="duplicatePresentationSlide()"><span class="material-symbols-outlined">content_copy</span><small>Duplicar</small></button>
-              <button class="ppt-ribbon-command danger" (click)="deletePresentationSlide()"><span class="material-symbols-outlined">delete</span><small>Eliminar</small></button>
-              <span class="ppt-ribbon-group-label">Diapositivas</span>
-            </div>
-            @if (activePresentationSlide(); as ribbonSlide) {
-              <div class="ppt-ribbon-group ppt-format-group">
-                <select class="ppt-ribbon-select" [value]="activePresentationTextTarget()" (change)="activePresentationTextTarget.set($any($event.target).value)"><option value="title">Título</option><option value="body">Contenido</option></select>
-                <select class="ppt-ribbon-select compact" [value]="activePresentationTextTarget() === 'title' ? ribbonSlide.style.titleFontSize : ribbonSlide.style.bodyFontSize" (change)="setPresentationFontSize(+$any($event.target).value)">
-                  @for (size of [14, 18, 22, 28, 32, 38, 44, 54, 64]; track size) { <option [value]="size">{{ size }}</option> }
-                </select>
-                <button class="ppt-mini-command" [class.active]="activePresentationTextTarget() === 'title' ? ribbonSlide.style.titleBold : ribbonSlide.style.bodyBold" (click)="togglePresentationTextStyle('Bold')"><strong>N</strong></button>
-                <button class="ppt-mini-command" [class.active]="activePresentationTextTarget() === 'title' ? ribbonSlide.style.titleItalic : ribbonSlide.style.bodyItalic" (click)="togglePresentationTextStyle('Italic')"><em>K</em></button>
-                <button class="ppt-mini-command" [class.active]="activePresentationTextTarget() === 'title' ? ribbonSlide.style.titleUnderline : ribbonSlide.style.bodyUnderline" (click)="togglePresentationTextStyle('Underline')"><u>S</u></button>
-                <button class="ppt-mini-command" (click)="setPresentationTextAlign('left')"><span class="material-symbols-outlined">format_align_left</span></button>
-                <button class="ppt-mini-command" (click)="setPresentationTextAlign('center')"><span class="material-symbols-outlined">format_align_center</span></button>
-                <button class="ppt-mini-command" (click)="setPresentationTextAlign('right')"><span class="material-symbols-outlined">format_align_right</span></button>
-                <span class="ppt-ribbon-group-label">Fuente y párrafo</span>
-              </div>
-            }
-            <div class="ppt-ribbon-group">
-              <button class="ppt-ribbon-command" [disabled]="activePresentationSlideIndex() === 0" (click)="movePresentationSlide(-1)"><span class="material-symbols-outlined">arrow_upward</span><small>Subir</small></button>
-              <button class="ppt-ribbon-command" [disabled]="activePresentationSlideIndex() >= presentationSlides().length - 1" (click)="movePresentationSlide(1)"><span class="material-symbols-outlined">arrow_downward</span><small>Bajar</small></button>
-              <span class="ppt-ribbon-group-label">Organizar</span>
-            </div>
-          } @else if (activePresentationRibbonTab() === 'insert') {
-            <div class="ppt-ribbon-group">
-              <button class="ppt-ribbon-command primary" (click)="addPresentationSlide()"><span class="material-symbols-outlined">add_box</span><small>Nueva diapositiva</small></button>
-              <button class="ppt-ribbon-command" (click)="insertPresentationBullet()"><span class="material-symbols-outlined">format_list_bulleted</span><small>Viñetas</small></button>
-              <button class="ppt-ribbon-command" (click)="duplicatePresentationSlide()"><span class="material-symbols-outlined">content_copy</span><small>Duplicar</small></button>
-              <span class="ppt-ribbon-group-label">Insertar</span>
-            </div>
-          } @else if (activePresentationRibbonTab() === 'design') {
-            <div class="ppt-ribbon-group ppt-layout-group">
-              <label>Diseño<select class="ppt-ribbon-select" [value]="activePresentationSlide().layout" (change)="setPresentationLayout($any($event.target).value)"><option value="title-body">Título y contenido</option><option value="title-only">Solo título</option><option value="section">Sección</option></select></label>
-              <span class="ppt-ribbon-group-label">Disposición</span>
-            </div>
-            <div class="ppt-ribbon-group ppt-theme-group">
-              @for (theme of presentationThemes; track theme.name) {
-                <button class="ppt-theme-swatch" [title]="theme.name" [style.background]="theme.backgroundColor" [style.border-color]="theme.accentColor" (click)="applyPresentationTheme(theme)"><span [style.background]="theme.accentColor"></span><small>{{ theme.name }}</small></button>
-              }
-              <span class="ppt-ribbon-group-label">Temas</span>
-            </div>
-          } @else if (activePresentationRibbonTab() === 'transitions') {
-            @if (activePresentationSlide(); as transitionSlide) {
-              <div class="ppt-ribbon-group">
-                <button class="ppt-ribbon-command primary" (click)="previewPresentationEffects()"><span class="material-symbols-outlined">preview</span><small>Vista previa</small></button>
-                <span class="ppt-ribbon-group-label">Vista previa</span>
-              </div>
-              <div class="ppt-ribbon-group ppt-effects-group">
-                @for (effect of [{id:'none', label:'Ninguna', icon:'block'}, {id:'fade', label:'Desvanecer', icon:'blur_on'}, {id:'push', label:'Empuje', icon:'east'}, {id:'zoom', label:'Zoom', icon:'zoom_out_map'}, {id:'wipe', label:'Barrido', icon:'gradient'}]; track effect.id) {
-                  <button class="ppt-ribbon-command" [class.selected]="transitionSlide.transition.type === effect.id" (click)="setPresentationTransition($any(effect.id))"><span class="material-symbols-outlined">{{ effect.icon }}</span><small>{{ effect.label }}</small></button>
-                }
-                <span class="ppt-ribbon-group-label">Transición a esta diapositiva</span>
-              </div>
-              <div class="ppt-ribbon-group ppt-timing-group">
-                <label>Duración <input type="number" min="0.1" max="5" step="0.1" [value]="transitionSlide.transition.duration" (change)="setPresentationTransitionDuration(+$any($event.target).value)" /> s</label>
-                <button class="ppt-action-btn" (click)="applyPresentationTransitionToAll()">Aplicar a todas</button>
-                <span class="ppt-ribbon-group-label">Intervalos</span>
-              </div>
-            }
-          } @else if (activePresentationRibbonTab() === 'animations') {
-            @if (activePresentationSlide(); as animationSlide) {
-              <div class="ppt-ribbon-group">
-                <button class="ppt-ribbon-command primary" (click)="previewPresentationEffects()"><span class="material-symbols-outlined">preview</span><small>Vista previa</small></button>
-                <select class="ppt-ribbon-select" [value]="activePresentationAnimationTarget()" (change)="activePresentationAnimationTarget.set($any($event.target).value)"><option value="title">Título</option><option value="body">Contenido</option><option value="both">Ambos</option></select>
-                <span class="ppt-ribbon-group-label">Objeto</span>
-              </div>
-              <div class="ppt-ribbon-group ppt-effects-group">
-                @for (effect of [{id:'none', label:'Ninguna', icon:'block'}, {id:'appear', label:'Aparecer', icon:'star'}, {id:'fade', label:'Desvanecer', icon:'blur_on'}, {id:'float', label:'Flotar', icon:'vertical_align_bottom'}, {id:'zoom', label:'Zoom', icon:'zoom_in'}]; track effect.id) {
-                  <button class="ppt-ribbon-command" [class.selected]="isPresentationAnimationSelected(animationSlide, $any(effect.id))" (click)="setPresentationAnimation($any(effect.id))"><span class="material-symbols-outlined">{{ effect.icon }}</span><small>{{ effect.label }}</small></button>
-                }
-                <span class="ppt-ribbon-group-label">Animación</span>
-              </div>
-              <div class="ppt-ribbon-group ppt-timing-group">
-                <label>Duración <input type="number" min="0.1" max="5" step="0.1" [value]="activePresentationAnimationTarget() === 'body' ? animationSlide.animations.body.duration : animationSlide.animations.title.duration" (change)="updatePresentationAnimationTiming('duration', +$any($event.target).value)" /> s</label>
-                <label>Retraso <input type="number" min="0" max="10" step="0.1" [value]="activePresentationAnimationTarget() === 'body' ? animationSlide.animations.body.delay : animationSlide.animations.title.delay" (change)="updatePresentationAnimationTiming('delay', +$any($event.target).value)" /> s</label>
-                <span class="ppt-ribbon-group-label">Intervalos</span>
-              </div>
-            }
-          } @else {
-            <div class="ppt-ribbon-group">
-              <button class="ppt-ribbon-command primary" (click)="startPresentation(false)"><span class="material-symbols-outlined">first_page</span><small>Desde el inicio</small></button>
-              <button class="ppt-ribbon-command" (click)="startPresentation(true)"><span class="material-symbols-outlined">play_arrow</span><small>Desde aquí</small></button>
-              <button class="ppt-ribbon-command" [disabled]="presentationExporting()" (click)="downloadPresentationFile()"><span class="material-symbols-outlined">download</span><small>Exportar PPTX</small></button>
-              <span class="ppt-ribbon-group-label">Presentación</span>
-            </div>
-          }
-        </div>
-      </header>
-
-      <div class="ppt-workspace">
-        <aside class="ppt-slide-list custom-scrollbar">
-          @for (slide of presentationSlides(); track slide.id; let index = $index) {
-            <button
-              class="ppt-thumbnail-row"
-              [class.ppt-thumbnail-active]="activePresentationSlideIndex() === index"
-              (click)="selectPresentationSlide(index)"
-            >
-              <span class="ppt-thumbnail-number">{{ index + 1 }}</span>
-              <span class="ppt-thumbnail-canvas" [style.background]="slide.style.backgroundColor">
-                <strong [style.color]="slide.style.accentColor">{{ slide.title || ('NOTE_EDITOR.PPT_UNTITLED_SLIDE' | translate) }}</strong>
-                <small [style.color]="slide.style.textColor">{{ slide.body }}</small>
-              </span>
-            </button>
-          }
-          <button class="ppt-add-thumbnail" (click)="addPresentationSlide()">
-            <span class="material-symbols-outlined">add</span>
-            {{ 'NOTE_EDITOR.PPT_ADD_SLIDE' | translate }}
-          </button>
-        </aside>
-
-        <section class="ppt-editor-area custom-scrollbar">
-          @if (activePresentationSlide(); as slide) {
-            <div class="ppt-slide-stage" [ngClass]="presentationTransitionClass(slide, true)" [class.ppt-layout-section]="slide.layout === 'section'" [class.ppt-layout-title-only]="slide.layout === 'title-only'" [ngStyle]="getPresentationStageStyle(slide)" [style.animation-duration]="slide.transition.duration + 's'">
-              <input
-                class="ppt-slide-title"
-                [ngClass]="presentationAnimationClass(slide.animations.title, true)"
-                [style.animation-duration]="slide.animations.title.duration + 's'"
-                [style.animation-delay]="slide.animations.title.delay + 's'"
-                [ngStyle]="getPresentationTitleStyle(slide)"
-                [placeholder]="'NOTE_EDITOR.PPT_TITLE_PLACEHOLDER' | translate"
-                [value]="slide.title"
-                (focus)="activePresentationTextTarget.set('title')"
-                (input)="updatePresentationSlide('title', $any($event.target).value)"
-              />
-              @if (slide.layout !== 'title-only') {
-                <textarea
-                  class="ppt-slide-body"
-                  [ngClass]="presentationAnimationClass(slide.animations.body, true)"
-                  [style.animation-duration]="slide.animations.body.duration + 's'"
-                  [style.animation-delay]="slide.animations.body.delay + 's'"
-                  [ngStyle]="getPresentationBodyStyle(slide)"
-                  [placeholder]="'NOTE_EDITOR.PPT_BODY_PLACEHOLDER' | translate"
-                  [value]="slide.body"
-                  (focus)="activePresentationTextTarget.set('body')"
-                  (input)="updatePresentationSlide('body', $any($event.target).value)"
-                ></textarea>
-              }
-              <span class="ppt-slide-counter">{{ activePresentationSlideIndex() + 1 }} / {{ presentationSlides().length }}</span>
-            </div>
-            <label class="ppt-notes-panel">
-              <span>{{ 'NOTE_EDITOR.PPT_SPEAKER_NOTES' | translate }}</span>
-              <textarea
-                [placeholder]="'NOTE_EDITOR.PPT_NOTES_PLACEHOLDER' | translate"
-                [value]="slide.notes"
-                (input)="updatePresentationSlide('notes', $any($event.target).value)"
-              ></textarea>
-            </label>
-          }
-        </section>
-      </div>
-
-      @if (presentationMode() && presentedSlide(); as slide) {
-        <div class="ppt-presenter" (dblclick)="closePresentation()">
-          <button class="ppt-presenter-close" [title]="'NOTE_EDITOR.PPT_CLOSE_PRESENTATION' | translate" (click)="closePresentation()">
-            <span class="material-symbols-outlined">close</span>
-          </button>
-          <button class="ppt-presenter-nav ppt-presenter-prev" [disabled]="presentedSlideIndex() === 0" (click)="changePresentedSlide(-1)">
-            <span class="material-symbols-outlined">chevron_left</span>
-          </button>
-          @for (presented of [slide]; track presentedSlideIndex()) {
-            <article class="ppt-presented-slide" [ngClass]="presentationTransitionClass(presented)" [class.ppt-layout-section]="presented.layout === 'section'" [ngStyle]="getPresentationStageStyle(presented)" [style.animation-duration]="presented.transition.duration + 's'">
-              <h1 [ngClass]="presentationAnimationClass(presented.animations.title)" [style.animation-duration]="presented.animations.title.duration + 's'" [style.animation-delay]="presented.animations.title.delay + 's'" [ngStyle]="getPresentationTitleStyle(presented)">{{ presented.title }}</h1>
-              @if (presented.layout !== 'title-only') { <div class="ppt-presented-body" [ngClass]="presentationAnimationClass(presented.animations.body)" [style.animation-duration]="presented.animations.body.duration + 's'" [style.animation-delay]="presented.animations.body.delay + 's'" [ngStyle]="getPresentationBodyStyle(presented)">{{ presented.body }}</div> }
-              <span>{{ presentedSlideIndex() + 1 }} / {{ presentationSlides().length }}</span>
-            </article>
-          }
-          <button class="ppt-presenter-nav ppt-presenter-next" [disabled]="presentedSlideIndex() >= presentationSlides().length - 1" (click)="changePresentedSlide(1)">
-            <span class="material-symbols-outlined">chevron_right</span>
-          </button>
-        </div>
-      }
-    </div>
-    } @else if (note.file_type === 'xlsx') {
-    <!-- Excel Viewer Mode -->
-    <div class="xlsx-app flex flex-col h-full" (click)="closeXlsxContextMenu()">
-      <!-- Ribbon / Header bar -->
-      <div class="xlsx-ribbon flex items-center gap-2 px-3 py-1.5 flex-shrink-0">
-        <span class="material-symbols-outlined text-lg text-green-400">table_chart</span>
+        <span class="material-symbols-outlined text-xl text-red-500">picture_as_pdf</span>
         <input
-          class="xlsx-title-input text-xs font-semibold text-slate-200 flex-1 min-w-0 bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-green-500/50 rounded px-1 truncate placeholder-slate-500"
+          class="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-1 min-w-0 bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-primary/50 rounded px-1 truncate placeholder-slate-300 dark:placeholder-slate-600"
           type="text"
           [placeholder]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate"
           [value]="title()"
@@ -262,708 +24,2174 @@
         />
         <!-- AI Chat toggle -->
         <button
-          class="flex items-center justify-center w-7 h-7 rounded hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+          class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-primary transition-colors"
           [title]="'NOTE_EDITOR.AI_ASSISTANT' | translate"
           (click)="aiChatToggle.emit()"
         >
           <span class="material-symbols-outlined text-base">smart_toy</span>
         </button>
         <button
-          class="flex items-center justify-center w-7 h-7 rounded hover:bg-white/10 text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+          class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary hover:bg-primary/90 text-white transition-colors"
+          (click)="downloadPdf()"
+        >
+          <span class="material-symbols-outlined text-sm">download</span>
+          {{ 'NOTE_EDITOR.DOWNLOAD_PDF' | translate }}
+        </button>
+        <button
+          class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
           [disabled]="printing()"
           [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate"
           (click)="printCurrentDocument()"
         >
-          <span class="material-symbols-outlined text-base">print</span>
-        </button>
-        <div class="xlsx-export-control">
-          <span class="material-symbols-outlined text-sm">download</span>
-          <select
-            [attr.aria-label]="'NOTE_EDITOR.DOWNLOAD_EXCEL' | translate"
-            [title]="'NOTE_EDITOR.DOWNLOAD_EXCEL' | translate"
-            (change)="onWorkbookExport($event)"
-          >
-            <option value="">{{ 'NOTE_EDITOR.DOWNLOAD_EXCEL' | translate }}</option>
-            <option value="xlsx">XLSX</option>
-            <option value="xls">XLS</option>
-            <option value="csv">CSV</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Formatting toolbar -->
-      <div class="xlsx-toolbar flex items-center gap-0.5 px-2 py-1 flex-shrink-0">
-        <!-- Clipboard group -->
-        <button class="xlsx-tb-btn" [title]="'NOTE_EDITOR.XLSX_CUT' | translate" (click)="xlsxCut()">
-          <span class="material-symbols-outlined text-[15px]">content_cut</span>
-        </button>
-        <button class="xlsx-tb-btn" [title]="'NOTE_EDITOR.XLSX_COPY' | translate" (click)="xlsxCopy()">
-          <span class="material-symbols-outlined text-[15px]">content_copy</span>
-        </button>
-        <button class="xlsx-tb-btn" [title]="'NOTE_EDITOR.XLSX_PASTE' | translate" (click)="xlsxPaste()">
-          <span class="material-symbols-outlined text-[15px]">content_paste</span>
-        </button>
-
-        <div class="xlsx-tb-sep"></div>
-
-        <!-- Font size selector -->
-        <select
-          class="xlsx-tb-select"
-          [value]="xlsxFontSize()"
-          (change)="setXlsxFontSize(+$any($event.target).value)"
-          [title]="'NOTE_EDITOR.XLSX_FONT_SIZE' | translate"
-        >
-          <option value="8">8</option>
-          <option value="9">9</option>
-          <option value="10">10</option>
-          <option value="11">11</option>
-          <option value="12">12</option>
-          <option value="14">14</option>
-          <option value="16">16</option>
-          <option value="18">18</option>
-          <option value="20">20</option>
-          <option value="24">24</option>
-          <option value="28">28</option>
-          <option value="36">36</option>
-        </select>
-
-        <div class="xlsx-tb-sep"></div>
-
-        <!-- Text style buttons -->
-        <button class="xlsx-tb-btn" [class.xlsx-tb-active]="xlsxBold()" [title]="'NOTE_EDITOR.BOLD' | translate" (click)="toggleXlsxBold()">
-          <span class="material-symbols-outlined text-[15px]">format_bold</span>
-        </button>
-        <button class="xlsx-tb-btn" [class.xlsx-tb-active]="xlsxItalic()" [title]="'NOTE_EDITOR.ITALIC' | translate" (click)="toggleXlsxItalic()">
-          <span class="material-symbols-outlined text-[15px]">format_italic</span>
-        </button>
-        <button class="xlsx-tb-btn" [class.xlsx-tb-active]="xlsxUnderline()" [title]="'NOTE_EDITOR.UNDERLINE' | translate" (click)="toggleXlsxUnderline()">
-          <span class="material-symbols-outlined text-[15px]">format_underlined</span>
-        </button>
-
-        <div class="xlsx-tb-sep"></div>
-
-        <!-- Alignment -->
-        <button class="xlsx-tb-btn" [class.xlsx-tb-active]="xlsxAlign() === 'left'" [title]="'NOTE_EDITOR.ALIGN_LEFT' | translate" (click)="setXlsxAlign('left')">
-          <span class="material-symbols-outlined text-[15px]">format_align_left</span>
-        </button>
-        <button class="xlsx-tb-btn" [class.xlsx-tb-active]="xlsxAlign() === 'center'" [title]="'NOTE_EDITOR.ALIGN_CENTER' | translate" (click)="setXlsxAlign('center')">
-          <span class="material-symbols-outlined text-[15px]">format_align_center</span>
-        </button>
-        <button class="xlsx-tb-btn" [class.xlsx-tb-active]="xlsxAlign() === 'right'" [title]="'NOTE_EDITOR.ALIGN_RIGHT' | translate" (click)="setXlsxAlign('right')">
-          <span class="material-symbols-outlined text-[15px]">format_align_right</span>
-        </button>
-
-        <div class="xlsx-tb-sep"></div>
-
-        <!-- Row/Col operations -->
-        <button class="xlsx-tb-btn" [title]="'NOTE_EDITOR.XLSX_INSERT_ROW' | translate" (click)="xlsxInsertRow(true)">
-          <span class="material-symbols-outlined text-[15px]">playlist_add</span>
-        </button>
-        <button class="xlsx-tb-btn" [title]="'NOTE_EDITOR.XLSX_INSERT_COL' | translate" (click)="xlsxInsertCol(true)">
-          <span class="material-symbols-outlined text-[15px]">view_column</span>
-        </button>
-        <button class="xlsx-tb-btn" [title]="'NOTE_EDITOR.XLSX_DELETE' | translate" (click)="xlsxDeleteSelection()">
-          <span class="material-symbols-outlined text-[15px]">delete</span>
-        </button>
-
-        <div class="xlsx-tb-sep"></div>
-
-        <!-- Move complete rows/columns. Select their headers first. -->
-        <button class="xlsx-tb-btn" [disabled]="!xlsxSelectingFullRows()" [title]="'NOTE_EDITOR.XLSX_MOVE_ROW_UP' | translate" (click)="xlsxMoveRows(-1)">
-          <span class="material-symbols-outlined text-[15px]">move_up</span>
-        </button>
-        <button class="xlsx-tb-btn" [disabled]="!xlsxSelectingFullRows()" [title]="'NOTE_EDITOR.XLSX_MOVE_ROW_DOWN' | translate" (click)="xlsxMoveRows(1)">
-          <span class="material-symbols-outlined text-[15px]">move_down</span>
-        </button>
-        <button class="xlsx-tb-btn" [disabled]="!xlsxSelectingFullCols()" [title]="'NOTE_EDITOR.XLSX_MOVE_COL_LEFT' | translate" (click)="xlsxMoveCols(-1)">
-          <span class="material-symbols-outlined text-[15px]">keyboard_double_arrow_left</span>
-        </button>
-        <button class="xlsx-tb-btn" [disabled]="!xlsxSelectingFullCols()" [title]="'NOTE_EDITOR.XLSX_MOVE_COL_RIGHT' | translate" (click)="xlsxMoveCols(1)">
-          <span class="material-symbols-outlined text-[15px]">keyboard_double_arrow_right</span>
+          <span class="material-symbols-outlined text-sm">print</span>
+          {{ 'NOTE_EDITOR.PRINT' | translate }}
         </button>
       </div>
-
-      <!-- Formula bar -->
-      <div class="xlsx-formula-bar flex items-center flex-shrink-0">
-        <div class="xlsx-name-box">
-          @if (selectedCell(); as sc) { {{ xlsxRangeLabel }} } @else { &mdash; }
-        </div>
-        <div class="xlsx-fx-label">
-          <span style="font-style: italic; font-weight: 600;">fx</span>
-        </div>
-        <div class="xlsx-formula-editor">
-          <input
-            class="xlsx-formula-input"
-            [value]="formulaBarValue()"
-            (input)="onFormulaInput($any($event.target).value)"
-            (keydown)="onFormulaBarKeydown($event)"
-            [placeholder]="'NOTE_EDITOR.CELL_VALUE' | translate"
-          />
-          @if (formulaSuggestions().length > 0) {
-            <div class="xlsx-formula-suggestions" role="listbox">
-              @for (suggestion of formulaSuggestions(); track suggestion.name; let index = $index) {
-                <button
-                  type="button"
-                  role="option"
-                  class="xlsx-formula-suggestion"
-                  [class.active]="activeFormulaSuggestion() === index"
-                  (mousedown)="$event.preventDefault()"
-                  (click)="acceptFormulaSuggestion(suggestion)"
-                >
-                  <strong>{{ suggestion.name }}</strong>
-                  <span>{{ suggestion.syntax }}</span>
-                  <small>{{ suggestion.description }}</small>
-                </button>
-              }
-            </div>
-          }
-        </div>
-      </div>
-
-      <!-- Spreadsheet grid area -->
-      <div class="xlsx-grid-container flex-1 overflow-auto" tabindex="0" (keydown)="onGridKeydown($event)" #xlsxGrid>
-        @if (xlsxLoading()) {
-          <div class="flex items-center justify-center h-full">
+      <div class="flex-1 overflow-hidden">
+        @if (pdfUrl()) {
+          <embed [src]="pdfUrl()!" type="application/pdf" class="w-full h-full" />
+        } @else {
+          <div class="flex-1 flex items-center justify-center h-full">
             <div class="text-center text-slate-400">
-              <span class="material-symbols-outlined text-5xl mb-3 block animate-pulse">table_chart</span>
-              <p class="text-sm">{{ 'NOTE_EDITOR.LOADING_EXCEL' | translate }}</p>
+              <span class="material-symbols-outlined text-5xl mb-3 block animate-pulse"
+                >picture_as_pdf</span
+              >
+              <p class="text-sm">{{ 'NOTE_EDITOR.LOADING_PDF' | translate }}</p>
             </div>
           </div>
-        } @else if (activeSheet) {
-          <table class="xlsx-grid">
-            <thead>
-              <tr>
-                <th class="xlsx-corner" (click)="onCornerClick()"></th>
-                @for (ci of columnIndices; track ci) {
-                  <th class="xlsx-col-header"
+        }
+      </div>
+    } @else if (note.file_type === 'pptx') {
+      <!-- Presentation Editor Mode -->
+      <div class="ppt-app">
+        <header class="ppt-ribbon-shell">
+          <div class="ppt-topbar">
+            <span class="material-symbols-outlined text-orange-500">slideshow</span>
+            <input
+              class="ppt-title-input"
+              type="text"
+              [placeholder]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate"
+              [value]="title()"
+              (input)="onTitleChange($any($event.target).value)"
+            />
+            <button
+              class="ppt-toolbar-btn"
+              [title]="'NOTE_EDITOR.AI_ASSISTANT' | translate"
+              (click)="aiChatToggle.emit()"
+            >
+              <span class="material-symbols-outlined">smart_toy</span>
+            </button>
+            <button class="ppt-action-btn ppt-present-btn" (click)="startPresentation(true)">
+              <span class="material-symbols-outlined">play_arrow</span
+              >{{ 'NOTE_EDITOR.PPT_PRESENT' | translate }}
+            </button>
+            <button
+              class="ppt-action-btn"
+              [disabled]="printing()"
+              [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate"
+              (click)="printCurrentDocument()"
+            >
+              <span class="material-symbols-outlined">print</span
+              >{{ 'NOTE_EDITOR.PRINT' | translate }}
+            </button>
+            <button
+              class="ppt-action-btn"
+              [disabled]="presentationExporting()"
+              (click)="downloadPresentationFile()"
+            >
+              <span class="material-symbols-outlined">download</span
+              >{{ 'NOTE_EDITOR.PPT_EXPORT' | translate }}
+            </button>
+          </div>
+
+          <nav class="ppt-ribbon-tabs" aria-label="Herramientas de presentación">
+            <button
+              [class.active]="activePresentationRibbonTab() === 'home'"
+              (click)="activePresentationRibbonTab.set('home')"
+            >
+              Inicio
+            </button>
+            <button
+              [class.active]="activePresentationRibbonTab() === 'insert'"
+              (click)="activePresentationRibbonTab.set('insert')"
+            >
+              Insertar
+            </button>
+            <button
+              [class.active]="activePresentationRibbonTab() === 'design'"
+              (click)="activePresentationRibbonTab.set('design')"
+            >
+              Diseño
+            </button>
+            <button
+              [class.active]="activePresentationRibbonTab() === 'transitions'"
+              (click)="activePresentationRibbonTab.set('transitions')"
+            >
+              Transiciones
+            </button>
+            <button
+              [class.active]="activePresentationRibbonTab() === 'animations'"
+              (click)="activePresentationRibbonTab.set('animations')"
+            >
+              Animaciones
+            </button>
+            <button
+              [class.active]="activePresentationRibbonTab() === 'slideshow'"
+              (click)="activePresentationRibbonTab.set('slideshow')"
+            >
+              Presentación
+            </button>
+          </nav>
+
+          <div class="ppt-ribbon">
+            @if (activePresentationRibbonTab() === 'home') {
+              <div class="ppt-ribbon-group">
+                <button class="ppt-ribbon-command primary" (click)="addPresentationSlide()">
+                  <span class="material-symbols-outlined">add_box</span
+                  ><small>Nueva diapositiva</small>
+                </button>
+                <button class="ppt-ribbon-command" (click)="duplicatePresentationSlide()">
+                  <span class="material-symbols-outlined">content_copy</span><small>Duplicar</small>
+                </button>
+                <button class="ppt-ribbon-command danger" (click)="deletePresentationSlide()">
+                  <span class="material-symbols-outlined">delete</span><small>Eliminar</small>
+                </button>
+                <span class="ppt-ribbon-group-label">Diapositivas</span>
+              </div>
+              @if (activePresentationSlide(); as ribbonSlide) {
+                <div class="ppt-ribbon-group ppt-format-group">
+                  <select
+                    class="ppt-ribbon-select"
+                    [value]="activePresentationTextTarget()"
+                    (change)="activePresentationTextTarget.set($any($event.target).value)"
+                  >
+                    <option value="title">Título</option>
+                    <option value="body">Contenido</option>
+                  </select>
+                  <select
+                    class="ppt-ribbon-select compact"
+                    [value]="
+                      activePresentationTextTarget() === 'title'
+                        ? ribbonSlide.style.titleFontSize
+                        : ribbonSlide.style.bodyFontSize
+                    "
+                    (change)="setPresentationFontSize(+$any($event.target).value)"
+                  >
+                    @for (size of [14, 18, 22, 28, 32, 38, 44, 54, 64]; track size) {
+                      <option [value]="size">{{ size }}</option>
+                    }
+                  </select>
+                  <button
+                    class="ppt-mini-command"
+                    [class.active]="
+                      activePresentationTextTarget() === 'title'
+                        ? ribbonSlide.style.titleBold
+                        : ribbonSlide.style.bodyBold
+                    "
+                    (click)="togglePresentationTextStyle('Bold')"
+                  >
+                    <strong>N</strong>
+                  </button>
+                  <button
+                    class="ppt-mini-command"
+                    [class.active]="
+                      activePresentationTextTarget() === 'title'
+                        ? ribbonSlide.style.titleItalic
+                        : ribbonSlide.style.bodyItalic
+                    "
+                    (click)="togglePresentationTextStyle('Italic')"
+                  >
+                    <em>K</em>
+                  </button>
+                  <button
+                    class="ppt-mini-command"
+                    [class.active]="
+                      activePresentationTextTarget() === 'title'
+                        ? ribbonSlide.style.titleUnderline
+                        : ribbonSlide.style.bodyUnderline
+                    "
+                    (click)="togglePresentationTextStyle('Underline')"
+                  >
+                    <u>S</u>
+                  </button>
+                  <button class="ppt-mini-command" (click)="setPresentationTextAlign('left')">
+                    <span class="material-symbols-outlined">format_align_left</span>
+                  </button>
+                  <button class="ppt-mini-command" (click)="setPresentationTextAlign('center')">
+                    <span class="material-symbols-outlined">format_align_center</span>
+                  </button>
+                  <button class="ppt-mini-command" (click)="setPresentationTextAlign('right')">
+                    <span class="material-symbols-outlined">format_align_right</span>
+                  </button>
+                  <span class="ppt-ribbon-group-label">Fuente y párrafo</span>
+                </div>
+              }
+              <div class="ppt-ribbon-group">
+                <button
+                  class="ppt-ribbon-command"
+                  [disabled]="activePresentationSlideIndex() === 0"
+                  (click)="movePresentationSlide(-1)"
+                >
+                  <span class="material-symbols-outlined">arrow_upward</span><small>Subir</small>
+                </button>
+                <button
+                  class="ppt-ribbon-command"
+                  [disabled]="activePresentationSlideIndex() >= presentationSlides().length - 1"
+                  (click)="movePresentationSlide(1)"
+                >
+                  <span class="material-symbols-outlined">arrow_downward</span><small>Bajar</small>
+                </button>
+                <span class="ppt-ribbon-group-label">Organizar</span>
+              </div>
+            } @else if (activePresentationRibbonTab() === 'insert') {
+              <div class="ppt-ribbon-group">
+                <button class="ppt-ribbon-command primary" (click)="addPresentationSlide()">
+                  <span class="material-symbols-outlined">add_box</span
+                  ><small>Nueva diapositiva</small>
+                </button>
+                <button class="ppt-ribbon-command" (click)="insertPresentationBullet()">
+                  <span class="material-symbols-outlined">format_list_bulleted</span
+                  ><small>Viñetas</small>
+                </button>
+                <button class="ppt-ribbon-command" (click)="duplicatePresentationSlide()">
+                  <span class="material-symbols-outlined">content_copy</span><small>Duplicar</small>
+                </button>
+                <span class="ppt-ribbon-group-label">Insertar</span>
+              </div>
+            } @else if (activePresentationRibbonTab() === 'design') {
+              <div class="ppt-ribbon-group ppt-layout-group">
+                <label
+                  >Diseño<select
+                    class="ppt-ribbon-select"
+                    [value]="activePresentationSlide().layout"
+                    (change)="setPresentationLayout($any($event.target).value)"
+                  >
+                    <option value="title-body">Título y contenido</option>
+                    <option value="title-only">Solo título</option>
+                    <option value="section">Sección</option>
+                  </select></label
+                >
+                <span class="ppt-ribbon-group-label">Disposición</span>
+              </div>
+              <div class="ppt-ribbon-group ppt-theme-group">
+                @for (theme of presentationThemes; track theme.name) {
+                  <button
+                    class="ppt-theme-swatch"
+                    [title]="theme.name"
+                    [style.background]="theme.backgroundColor"
+                    [style.border-color]="theme.accentColor"
+                    (click)="applyPresentationTheme(theme)"
+                  >
+                    <span [style.background]="theme.accentColor"></span
+                    ><small>{{ theme.name }}</small>
+                  </button>
+                }
+                <span class="ppt-ribbon-group-label">Temas</span>
+              </div>
+            } @else if (activePresentationRibbonTab() === 'transitions') {
+              @if (activePresentationSlide(); as transitionSlide) {
+                <div class="ppt-ribbon-group">
+                  <button class="ppt-ribbon-command primary" (click)="previewPresentationEffects()">
+                    <span class="material-symbols-outlined">preview</span
+                    ><small>Vista previa</small>
+                  </button>
+                  <span class="ppt-ribbon-group-label">Vista previa</span>
+                </div>
+                <div class="ppt-ribbon-group ppt-effects-group">
+                  @for (
+                    effect of [
+                      { id: 'none', label: 'Ninguna', icon: 'block' },
+                      { id: 'fade', label: 'Desvanecer', icon: 'blur_on' },
+                      { id: 'push', label: 'Empuje', icon: 'east' },
+                      { id: 'zoom', label: 'Zoom', icon: 'zoom_out_map' },
+                      { id: 'wipe', label: 'Barrido', icon: 'gradient' },
+                    ];
+                    track effect.id
+                  ) {
+                    <button
+                      class="ppt-ribbon-command"
+                      [class.selected]="transitionSlide.transition.type === effect.id"
+                      (click)="setPresentationTransition($any(effect.id))"
+                    >
+                      <span class="material-symbols-outlined">{{ effect.icon }}</span
+                      ><small>{{ effect.label }}</small>
+                    </button>
+                  }
+                  <span class="ppt-ribbon-group-label">Transición a esta diapositiva</span>
+                </div>
+                <div class="ppt-ribbon-group ppt-timing-group">
+                  <label
+                    >Duración
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="5"
+                      step="0.1"
+                      [value]="transitionSlide.transition.duration"
+                      (change)="setPresentationTransitionDuration(+$any($event.target).value)"
+                    />
+                    s</label
+                  >
+                  <button class="ppt-action-btn" (click)="applyPresentationTransitionToAll()">
+                    Aplicar a todas
+                  </button>
+                  <span class="ppt-ribbon-group-label">Intervalos</span>
+                </div>
+              }
+            } @else if (activePresentationRibbonTab() === 'animations') {
+              @if (activePresentationSlide(); as animationSlide) {
+                <div class="ppt-ribbon-group">
+                  <button class="ppt-ribbon-command primary" (click)="previewPresentationEffects()">
+                    <span class="material-symbols-outlined">preview</span
+                    ><small>Vista previa</small>
+                  </button>
+                  <select
+                    class="ppt-ribbon-select"
+                    [value]="activePresentationAnimationTarget()"
+                    (change)="activePresentationAnimationTarget.set($any($event.target).value)"
+                  >
+                    <option value="title">Título</option>
+                    <option value="body">Contenido</option>
+                    <option value="both">Ambos</option>
+                  </select>
+                  <span class="ppt-ribbon-group-label">Objeto</span>
+                </div>
+                <div class="ppt-ribbon-group ppt-effects-group">
+                  @for (
+                    effect of [
+                      { id: 'none', label: 'Ninguna', icon: 'block' },
+                      { id: 'appear', label: 'Aparecer', icon: 'star' },
+                      { id: 'fade', label: 'Desvanecer', icon: 'blur_on' },
+                      { id: 'float', label: 'Flotar', icon: 'vertical_align_bottom' },
+                      { id: 'zoom', label: 'Zoom', icon: 'zoom_in' },
+                    ];
+                    track effect.id
+                  ) {
+                    <button
+                      class="ppt-ribbon-command"
+                      [class.selected]="
+                        isPresentationAnimationSelected(animationSlide, $any(effect.id))
+                      "
+                      (click)="setPresentationAnimation($any(effect.id))"
+                    >
+                      <span class="material-symbols-outlined">{{ effect.icon }}</span
+                      ><small>{{ effect.label }}</small>
+                    </button>
+                  }
+                  <span class="ppt-ribbon-group-label">Animación</span>
+                </div>
+                <div class="ppt-ribbon-group ppt-timing-group">
+                  <label
+                    >Duración
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="5"
+                      step="0.1"
+                      [value]="
+                        activePresentationAnimationTarget() === 'body'
+                          ? animationSlide.animations.body.duration
+                          : animationSlide.animations.title.duration
+                      "
+                      (change)="
+                        updatePresentationAnimationTiming('duration', +$any($event.target).value)
+                      "
+                    />
+                    s</label
+                  >
+                  <label
+                    >Retraso
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      step="0.1"
+                      [value]="
+                        activePresentationAnimationTarget() === 'body'
+                          ? animationSlide.animations.body.delay
+                          : animationSlide.animations.title.delay
+                      "
+                      (change)="
+                        updatePresentationAnimationTiming('delay', +$any($event.target).value)
+                      "
+                    />
+                    s</label
+                  >
+                  <span class="ppt-ribbon-group-label">Intervalos</span>
+                </div>
+              }
+            } @else {
+              <div class="ppt-ribbon-group">
+                <button class="ppt-ribbon-command primary" (click)="startPresentation(false)">
+                  <span class="material-symbols-outlined">first_page</span
+                  ><small>Desde el inicio</small>
+                </button>
+                <button class="ppt-ribbon-command" (click)="startPresentation(true)">
+                  <span class="material-symbols-outlined">play_arrow</span><small>Desde aquí</small>
+                </button>
+                <button
+                  class="ppt-ribbon-command"
+                  [disabled]="presentationExporting()"
+                  (click)="downloadPresentationFile()"
+                >
+                  <span class="material-symbols-outlined">download</span
+                  ><small>Exportar PPTX</small>
+                </button>
+                <span class="ppt-ribbon-group-label">Presentación</span>
+              </div>
+            }
+          </div>
+        </header>
+
+        <div class="ppt-workspace">
+          <aside class="ppt-slide-list custom-scrollbar">
+            @for (slide of presentationSlides(); track slide.id; let index = $index) {
+              <button
+                class="ppt-thumbnail-row"
+                [class.ppt-thumbnail-active]="activePresentationSlideIndex() === index"
+                (click)="selectPresentationSlide(index)"
+              >
+                <span class="ppt-thumbnail-number">{{ index + 1 }}</span>
+                <span class="ppt-thumbnail-canvas" [style.background]="slide.style.backgroundColor">
+                  <strong [style.color]="slide.style.accentColor">{{
+                    slide.title || ('NOTE_EDITOR.PPT_UNTITLED_SLIDE' | translate)
+                  }}</strong>
+                  <small [style.color]="slide.style.textColor">{{ slide.body }}</small>
+                </span>
+              </button>
+            }
+            <button class="ppt-add-thumbnail" (click)="addPresentationSlide()">
+              <span class="material-symbols-outlined">add</span>
+              {{ 'NOTE_EDITOR.PPT_ADD_SLIDE' | translate }}
+            </button>
+          </aside>
+
+          <section class="ppt-editor-area custom-scrollbar">
+            @if (activePresentationSlide(); as slide) {
+              <div
+                class="ppt-slide-stage"
+                [ngClass]="presentationTransitionClass(slide, true)"
+                [class.ppt-layout-section]="slide.layout === 'section'"
+                [class.ppt-layout-title-only]="slide.layout === 'title-only'"
+                [ngStyle]="getPresentationStageStyle(slide)"
+                [style.animation-duration]="slide.transition.duration + 's'"
+              >
+                <input
+                  class="ppt-slide-title"
+                  [ngClass]="presentationAnimationClass(slide.animations.title, true)"
+                  [style.animation-duration]="slide.animations.title.duration + 's'"
+                  [style.animation-delay]="slide.animations.title.delay + 's'"
+                  [ngStyle]="getPresentationTitleStyle(slide)"
+                  [placeholder]="'NOTE_EDITOR.PPT_TITLE_PLACEHOLDER' | translate"
+                  [value]="slide.title"
+                  (focus)="activePresentationTextTarget.set('title')"
+                  (input)="updatePresentationSlide('title', $any($event.target).value)"
+                />
+                @if (slide.layout !== 'title-only') {
+                  <textarea
+                    class="ppt-slide-body"
+                    [ngClass]="presentationAnimationClass(slide.animations.body, true)"
+                    [style.animation-duration]="slide.animations.body.duration + 's'"
+                    [style.animation-delay]="slide.animations.body.delay + 's'"
+                    [ngStyle]="getPresentationBodyStyle(slide)"
+                    [placeholder]="'NOTE_EDITOR.PPT_BODY_PLACEHOLDER' | translate"
+                    [value]="slide.body"
+                    (focus)="activePresentationTextTarget.set('body')"
+                    (input)="updatePresentationSlide('body', $any($event.target).value)"
+                  ></textarea>
+                }
+                <span class="ppt-slide-counter"
+                  >{{ activePresentationSlideIndex() + 1 }} /
+                  {{ presentationSlides().length }}</span
+                >
+              </div>
+              <label class="ppt-notes-panel">
+                <span>{{ 'NOTE_EDITOR.PPT_SPEAKER_NOTES' | translate }}</span>
+                <textarea
+                  [placeholder]="'NOTE_EDITOR.PPT_NOTES_PLACEHOLDER' | translate"
+                  [value]="slide.notes"
+                  (input)="updatePresentationSlide('notes', $any($event.target).value)"
+                ></textarea>
+              </label>
+            }
+          </section>
+        </div>
+
+        @if (presentationMode() && presentedSlide(); as slide) {
+          <div class="ppt-presenter" (dblclick)="closePresentation()">
+            <button
+              class="ppt-presenter-close"
+              [title]="'NOTE_EDITOR.PPT_CLOSE_PRESENTATION' | translate"
+              (click)="closePresentation()"
+            >
+              <span class="material-symbols-outlined">close</span>
+            </button>
+            <button
+              class="ppt-presenter-nav ppt-presenter-prev"
+              [disabled]="presentedSlideIndex() === 0"
+              (click)="changePresentedSlide(-1)"
+            >
+              <span class="material-symbols-outlined">chevron_left</span>
+            </button>
+            @for (presented of [slide]; track presentedSlideIndex()) {
+              <article
+                class="ppt-presented-slide"
+                [ngClass]="presentationTransitionClass(presented)"
+                [class.ppt-layout-section]="presented.layout === 'section'"
+                [ngStyle]="getPresentationStageStyle(presented)"
+                [style.animation-duration]="presented.transition.duration + 's'"
+              >
+                <h1
+                  [ngClass]="presentationAnimationClass(presented.animations.title)"
+                  [style.animation-duration]="presented.animations.title.duration + 's'"
+                  [style.animation-delay]="presented.animations.title.delay + 's'"
+                  [ngStyle]="getPresentationTitleStyle(presented)"
+                >
+                  {{ presented.title }}
+                </h1>
+                @if (presented.layout !== 'title-only') {
+                  <div
+                    class="ppt-presented-body"
+                    [ngClass]="presentationAnimationClass(presented.animations.body)"
+                    [style.animation-duration]="presented.animations.body.duration + 's'"
+                    [style.animation-delay]="presented.animations.body.delay + 's'"
+                    [ngStyle]="getPresentationBodyStyle(presented)"
+                  >
+                    {{ presented.body }}
+                  </div>
+                }
+                <span>{{ presentedSlideIndex() + 1 }} / {{ presentationSlides().length }}</span>
+              </article>
+            }
+            <button
+              class="ppt-presenter-nav ppt-presenter-next"
+              [disabled]="presentedSlideIndex() >= presentationSlides().length - 1"
+              (click)="changePresentedSlide(1)"
+            >
+              <span class="material-symbols-outlined">chevron_right</span>
+            </button>
+          </div>
+        }
+      </div>
+    } @else if (note.file_type === 'xlsx') {
+      <!-- Excel Viewer Mode -->
+      <div
+        class="xlsx-app flex flex-col h-full"
+        [class.xlsx-saving]="xlsxSaving()"
+        [attr.aria-busy]="xlsxSaving()"
+        (click)="closeXlsxContextMenu()"
+      >
+        @if (xlsxCachedFormulaCount() > 0) {
+          <div class="xlsx-formula-compatibility" role="status">
+            {{
+              'NOTE_EDITOR.FORMULA_CACHED_NOTICE' | translate: { count: xlsxCachedFormulaCount() }
+            }}
+          </div>
+        }
+        @if (xlsxError(); as error) {
+          <div class="xlsx-error" role="alert">
+            {{ error | translate }}
+            @if (error === 'NOTE_EDITOR.XLSX_SAVE_ERROR') {
+              <button (click)="retryXlsxSave()">{{ 'NOTE_EDITOR.XLSX_RETRY' | translate }}</button>
+            }
+            <button (click)="xlsxError.set(null)" aria-label="Cerrar">×</button>
+          </div>
+        }
+        <!-- Ribbon / Header bar -->
+        <div class="xlsx-ribbon flex items-center gap-2 px-3 py-1.5 flex-shrink-0">
+          <span class="material-symbols-outlined text-lg text-green-400">table_chart</span>
+          <input
+            class="xlsx-title-input text-xs font-semibold text-slate-200 flex-1 min-w-0 bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-green-500/50 rounded px-1 truncate placeholder-slate-500"
+            type="text"
+            [placeholder]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate"
+            [value]="title()"
+            (input)="onTitleChange($any($event.target).value)"
+          />
+          <!-- AI Chat toggle -->
+          <button
+            class="flex items-center justify-center w-7 h-7 rounded hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+            [title]="'NOTE_EDITOR.AI_ASSISTANT' | translate"
+            (click)="aiChatToggle.emit()"
+          >
+            <span class="material-symbols-outlined text-base">smart_toy</span>
+          </button>
+          <button
+            class="flex items-center justify-center w-7 h-7 rounded hover:bg-white/10 text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+            [disabled]="printing()"
+            [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate"
+            (click)="printCurrentDocument()"
+          >
+            <span class="material-symbols-outlined text-base">print</span>
+          </button>
+          <div class="xlsx-export-control">
+            <span class="material-symbols-outlined text-sm">download</span>
+            <select
+              [attr.aria-label]="'NOTE_EDITOR.DOWNLOAD_EXCEL' | translate"
+              [title]="'NOTE_EDITOR.DOWNLOAD_EXCEL' | translate"
+              (change)="onWorkbookExport($event)"
+            >
+              <option value="">{{ 'NOTE_EDITOR.DOWNLOAD_EXCEL' | translate }}</option>
+              <option value="xlsx">XLSX</option>
+              <option value="xls">XLS</option>
+              <option value="csv">CSV</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Formatting toolbar -->
+        <div class="xlsx-toolbar flex items-center gap-0.5 px-2 py-1 flex-shrink-0">
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.PIVOT_TITLE' | translate"
+            (click)="openPivot()"
+          >
+            <span class="material-symbols-outlined text-[15px]">pivot_table_chart</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [disabled]="!xlsxPivots().length"
+            [title]="'NOTE_EDITOR.PIVOT_REFRESH' | translate"
+            (click)="refreshPivots()"
+          >
+            <span class="material-symbols-outlined text-[15px]">refresh</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_UNDO' | translate"
+            (click)="xlsxUndo()"
+          >
+            <span class="material-symbols-outlined text-[15px]">undo</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_REDO' | translate"
+            (click)="xlsxRedo()"
+          >
+            <span class="material-symbols-outlined text-[15px]">redo</span>
+          </button>
+          <!-- Clipboard group -->
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_CUT' | translate"
+            (click)="xlsxCut()"
+          >
+            <span class="material-symbols-outlined text-[15px]">content_cut</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_COPY' | translate"
+            (click)="xlsxCopy()"
+          >
+            <span class="material-symbols-outlined text-[15px]">content_copy</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_PASTE' | translate"
+            (click)="xlsxPaste()"
+          >
+            <span class="material-symbols-outlined text-[15px]">content_paste</span>
+          </button>
+
+          <div class="xlsx-tb-sep"></div>
+
+          <!-- Font size selector -->
+          <select
+            class="xlsx-tb-select"
+            [value]="xlsxFontSize()"
+            (change)="setXlsxFontSize(+$any($event.target).value)"
+            [title]="'NOTE_EDITOR.XLSX_FONT_SIZE' | translate"
+          >
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+            <option value="11">11</option>
+            <option value="12">12</option>
+            <option value="14">14</option>
+            <option value="16">16</option>
+            <option value="18">18</option>
+            <option value="20">20</option>
+            <option value="24">24</option>
+            <option value="28">28</option>
+            <option value="36">36</option>
+          </select>
+
+          <div class="xlsx-tb-sep"></div>
+
+          <!-- Text style buttons -->
+          <button
+            class="xlsx-tb-btn"
+            [class.xlsx-tb-active]="xlsxBold()"
+            [title]="'NOTE_EDITOR.BOLD' | translate"
+            (click)="toggleXlsxBold()"
+          >
+            <span class="material-symbols-outlined text-[15px]">format_bold</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [class.xlsx-tb-active]="xlsxItalic()"
+            [title]="'NOTE_EDITOR.ITALIC' | translate"
+            (click)="toggleXlsxItalic()"
+          >
+            <span class="material-symbols-outlined text-[15px]">format_italic</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [class.xlsx-tb-active]="xlsxUnderline()"
+            [title]="'NOTE_EDITOR.UNDERLINE' | translate"
+            (click)="toggleXlsxUnderline()"
+          >
+            <span class="material-symbols-outlined text-[15px]">format_underlined</span>
+          </button>
+
+          <div class="xlsx-tb-sep"></div>
+
+          <!-- Alignment -->
+          <button
+            class="xlsx-tb-btn"
+            [class.xlsx-tb-active]="xlsxAlign() === 'left'"
+            [title]="'NOTE_EDITOR.ALIGN_LEFT' | translate"
+            (click)="setXlsxAlign('left')"
+          >
+            <span class="material-symbols-outlined text-[15px]">format_align_left</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [class.xlsx-tb-active]="xlsxAlign() === 'center'"
+            [title]="'NOTE_EDITOR.ALIGN_CENTER' | translate"
+            (click)="setXlsxAlign('center')"
+          >
+            <span class="material-symbols-outlined text-[15px]">format_align_center</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [class.xlsx-tb-active]="xlsxAlign() === 'right'"
+            [title]="'NOTE_EDITOR.ALIGN_RIGHT' | translate"
+            (click)="setXlsxAlign('right')"
+          >
+            <span class="material-symbols-outlined text-[15px]">format_align_right</span>
+          </button>
+
+          <div class="xlsx-tb-sep"></div>
+
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_MERGE' | translate"
+            (click)="xlsxMerge()"
+          >
+            <span class="material-symbols-outlined text-[15px]">cell_merge</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_MERGE_CENTER' | translate"
+            (click)="xlsxMerge(true)"
+          >
+            <span class="material-symbols-outlined text-[15px]">align_horizontal_center</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_UNMERGE' | translate"
+            (click)="xlsxUnmerge()"
+          >
+            <span class="material-symbols-outlined text-[15px]">cell_split</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_WRAP' | translate"
+            (click)="
+              formatXlsx(
+                'wrap',
+                !getCellFormat(selectedCell()?.row ?? 0, selectedCell()?.col ?? 0).wrap
+              )
+            "
+          >
+            <span class="material-symbols-outlined text-[15px]">wrap_text</span>
+          </button>
+          <label class="xlsx-color-control" [title]="'NOTE_EDITOR.XLSX_TEXT_COLOR' | translate"
+            ><span class="material-symbols-outlined text-[15px]">format_color_text</span
+            ><input
+              type="color"
+              value="#000000"
+              [attr.aria-label]="'NOTE_EDITOR.XLSX_TEXT_COLOR' | translate"
+              (input)="formatXlsx('color', $any($event.target).value)"
+          /></label>
+          <label class="xlsx-color-control" [title]="'NOTE_EDITOR.XLSX_FILL_COLOR' | translate"
+            ><span class="material-symbols-outlined text-[15px]">format_color_fill</span
+            ><input
+              type="color"
+              value="#ffffff"
+              [attr.aria-label]="'NOTE_EDITOR.XLSX_FILL_COLOR' | translate"
+              (input)="formatXlsx('background', $any($event.target).value)"
+          /></label>
+          <select
+            class="xlsx-tb-select"
+            [attr.aria-label]="'NOTE_EDITOR.XLSX_NUMBER_FORMAT' | translate"
+            (change)="formatXlsx('numberFormat', $any($event.target).value)"
+          >
+            <option value="General">{{ 'NOTE_EDITOR.XLSX_GENERAL' | translate }}</option>
+            <option value="0.00">0.00</option>
+            <option value="#,##0.00">1,000.00</option>
+            <option value="0.00%">%</option>
+            <option value='"$"#,##0.00'>$</option>
+            <option value="yyyy-mm-dd">AAAA-MM-DD</option>
+          </select>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_SORT_ASC' | translate"
+            (click)="xlsxSort()"
+          >
+            <span class="material-symbols-outlined text-[15px]">sort_by_alpha</span>↑
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_SORT_DESC' | translate"
+            (click)="xlsxSort(true)"
+          >
+            <span class="material-symbols-outlined text-[15px]">sort_by_alpha</span>↓
+          </button>
+          <!-- Row/Col operations -->
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_INSERT_ROW' | translate"
+            (click)="xlsxInsertRow(true)"
+          >
+            <span class="material-symbols-outlined text-[15px]">playlist_add</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_INSERT_COL' | translate"
+            (click)="xlsxInsertCol(true)"
+          >
+            <span class="material-symbols-outlined text-[15px]">view_column</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [title]="'NOTE_EDITOR.XLSX_DELETE' | translate"
+            (click)="xlsxDeleteSelection()"
+          >
+            <span class="material-symbols-outlined text-[15px]">delete</span>
+          </button>
+
+          <div class="xlsx-tb-sep"></div>
+
+          <!-- Move complete rows/columns. Select their headers first. -->
+          <button
+            class="xlsx-tb-btn"
+            [disabled]="!xlsxSelectingFullRows()"
+            [title]="'NOTE_EDITOR.XLSX_MOVE_ROW_UP' | translate"
+            (click)="xlsxMoveRows(-1)"
+          >
+            <span class="material-symbols-outlined text-[15px]">move_up</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [disabled]="!xlsxSelectingFullRows()"
+            [title]="'NOTE_EDITOR.XLSX_MOVE_ROW_DOWN' | translate"
+            (click)="xlsxMoveRows(1)"
+          >
+            <span class="material-symbols-outlined text-[15px]">move_down</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [disabled]="!xlsxSelectingFullCols()"
+            [title]="'NOTE_EDITOR.XLSX_MOVE_COL_LEFT' | translate"
+            (click)="xlsxMoveCols(-1)"
+          >
+            <span class="material-symbols-outlined text-[15px]">keyboard_double_arrow_left</span>
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [disabled]="!xlsxSelectingFullCols()"
+            [title]="'NOTE_EDITOR.XLSX_MOVE_COL_RIGHT' | translate"
+            (click)="xlsxMoveCols(1)"
+          >
+            <span class="material-symbols-outlined text-[15px]">keyboard_double_arrow_right</span>
+          </button>
+        </div>
+
+        <div class="xlsx-chart-toolbar">
+          <button
+            class="xlsx-tb-btn"
+            [disabled]="xlsxSaving() || !!activePivot()"
+            (click)="openTableResize(true)"
+          >
+            <span class="material-symbols-outlined">add</span
+            >{{ 'NOTE_EDITOR.TABLE_NEW' | translate }}
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [disabled]="xlsxSaving() || !hasXlsxTables()"
+            (click)="openTableResize()"
+          >
+            <span class="material-symbols-outlined">table_chart</span
+            >{{ 'NOTE_EDITOR.TABLE_RESIZE' | translate }}
+          </button>
+          <button
+            class="xlsx-tb-btn"
+            [disabled]="xlsxSaving()"
+            (click)="openChart()"
+            [title]="'NOTE_EDITOR.CHART_NEW' | translate"
+          >
+            <span class="material-symbols-outlined">insert_chart</span
+            >{{ 'NOTE_EDITOR.CHART_NEW' | translate }}
+          </button>
+        </div>
+        @if (activePivot(); as pivot) {
+          <div class="xlsx-pivot-notice">
+            <strong>{{ pivot.name }}</strong
+            ><span>{{ 'NOTE_EDITOR.PIVOT_RESULT_NOTICE' | translate }}</span
+            ><button (click)="openPivot()">{{ 'NOTE_EDITOR.PIVOT_EDIT' | translate }}</button
+            ><button (click)="openPivot(true)">{{ 'NOTE_EDITOR.PIVOT_NEW' | translate }}</button>
+          </div>
+        }
+        @if (pivotWarnings().length) {
+          <div class="xlsx-error" role="alert">
+            {{ 'NOTE_EDITOR.PIVOT_STALE' | translate
+            }}<button (click)="openPivot()">{{ 'NOTE_EDITOR.PIVOT_EDIT' | translate }}</button>
+          </div>
+        }
+        <!-- Formula bar -->
+        <div class="xlsx-formula-bar flex items-center flex-shrink-0">
+          <div class="xlsx-name-box">
+            @if (selectedCell(); as sc) {
+              {{ xlsxRangeLabel }}
+            } @else {
+              &mdash;
+            }
+          </div>
+          <div class="xlsx-fx-label">
+            <span style="font-style: italic; font-weight: 600">fx</span>
+          </div>
+          <div class="xlsx-formula-editor">
+            <input
+              class="xlsx-formula-input"
+              [value]="formulaBarValue()"
+              (input)="onFormulaInput($any($event.target).value)"
+              (keydown)="onFormulaBarKeydown($event)"
+              [placeholder]="'NOTE_EDITOR.CELL_VALUE' | translate"
+            />
+            @if (formulaSuggestions().length > 0) {
+              <div class="xlsx-formula-suggestions" role="listbox">
+                @for (
+                  suggestion of formulaSuggestions();
+                  track suggestion.name;
+                  let index = $index
+                ) {
+                  <button
+                    type="button"
+                    role="option"
+                    class="xlsx-formula-suggestion"
+                    [class.active]="activeFormulaSuggestion() === index"
+                    (mousedown)="$event.preventDefault()"
+                    (click)="acceptFormulaSuggestion(suggestion)"
+                  >
+                    <strong>{{ suggestion.name }}</strong>
+                    <span>{{ suggestion.syntax }}</span>
+                    <small>{{ suggestion.description }}</small>
+                  </button>
+                }
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- Spreadsheet grid area -->
+        <div
+          class="xlsx-grid-container flex-1 overflow-auto"
+          tabindex="0"
+          (keydown)="onGridKeydown($event)"
+          #xlsxGrid
+        >
+          @if (xlsxLoading()) {
+            <div class="flex items-center justify-center h-full">
+              <div class="text-center text-slate-400">
+                <span class="material-symbols-outlined text-5xl mb-3 block animate-pulse"
+                  >table_chart</span
+                >
+                <p class="text-sm">{{ 'NOTE_EDITOR.LOADING_EXCEL' | translate }}</p>
+              </div>
+            </div>
+          } @else if (activeSheet) {
+            <table class="xlsx-grid">
+              <thead>
+                <tr>
+                  <th class="xlsx-corner" (click)="onCornerClick()"></th>
+                  @for (ci of columnIndices; track ci) {
+                    <th
+                      class="xlsx-col-header"
                       [style.width.px]="getColumnWidth(ci)"
                       [style.min-width.px]="getColumnWidth(ci)"
                       [style.max-width.px]="getColumnWidth(ci)"
                       [class.xlsx-col-active]="selectedCell()?.col === ci"
                       [class.xlsx-col-in-range]="isColInRange(ci)"
                       (click)="onColHeaderClick($event, ci)"
-                      (contextmenu)="onColHeaderContextMenu($event, ci)">
-                    {{ getColumnLabel(ci) }}
-                    <span class="xlsx-col-resizer" (mousedown)="startColumnResize($event, ci)" (click)="$event.stopPropagation()"></span>
-                  </th>
-                }
-              </tr>
-            </thead>
-            <tbody>
-              @for (ri of rowIndices; track ri) {
-                <tr [style.height.px]="getRowHeight(ri)">
-                  <td class="xlsx-row-header"
+                      (contextmenu)="onColHeaderContextMenu($event, ci)"
+                    >
+                      {{ getColumnLabel(ci) }}
+                      <span
+                        class="xlsx-col-resizer"
+                        (mousedown)="startColumnResize($event, ci)"
+                        (click)="$event.stopPropagation()"
+                      ></span>
+                    </th>
+                  }
+                </tr>
+              </thead>
+              <tbody>
+                @for (ri of rowIndices; track ri) {
+                  <tr [style.height.px]="getRowHeight(ri)">
+                    <td
+                      class="xlsx-row-header"
                       [style.height.px]="getRowHeight(ri)"
                       [class.xlsx-row-active]="selectedCell()?.row === ri"
                       [class.xlsx-row-in-range]="isRowInRange(ri)"
                       (click)="onRowHeaderClick($event, ri)"
-                      (contextmenu)="onRowHeaderContextMenu($event, ri)">
-                    {{ ri + 1 }}
-                    <span class="xlsx-row-resizer" (mousedown)="startRowResize($event, ri)" (click)="$event.stopPropagation()"></span>
-                  </td>
-                  @for (ci of columnIndices; track ci) {
-                    <td
-                      class="xlsx-cell"
-                      [class.xlsx-cell-selected]="selectedCell()?.row === ri && selectedCell()?.col === ci"
-                      [class.xlsx-cell-in-range]="isCellInRange(ri, ci)"
-                      [class.xlsx-cell-numeric]="isCellNumeric(ri, ci)"
-                      [class.xlsx-cell-formula]="cellHasFormula(ri, ci)"
-                      [style.width.px]="getColumnWidth(ci)"
-                      [style.min-width.px]="getColumnWidth(ci)"
-                      [style.max-width.px]="getColumnWidth(ci)"
-                      [style.height.px]="getRowHeight(ri)"
-                      [style.max-height.px]="getRowHeight(ri)"
-                      [ngStyle]="getCellStyle(ri, ci)"
-                      (mousedown)="onCellMousedown($event, ri, ci)"
-                      (mouseenter)="onCellMouseenter(ri, ci)"
-                      (dblclick)="startEditCell(ri, ci)"
-                      (contextmenu)="onXlsxContextMenu($event, ri, ci)"
+                      (contextmenu)="onRowHeaderContextMenu($event, ri)"
                     >
-                      @if (editingCell()?.row === ri && editingCell()?.col === ci) {
-                        <input
-                          class="xlsx-cell-input"
-                          [value]="formulaBarValue()"
-                          (input)="onFormulaInput($any($event.target).value)"
-                          (keydown)="onCellKeydown($event)"
-                          (blur)="commitCellEdit(true)"
-                          #cellInput
-                        />
-                      } @else {
-                        @if (getCellValue(ri, ci); as val) {
-                          <span class="xlsx-cell-value">{{ val }}</span>
-                        }
-                      }
+                      {{ ri + 1 }}
+                      <span
+                        class="xlsx-row-resizer"
+                        (mousedown)="startRowResize($event, ri)"
+                        (click)="$event.stopPropagation()"
+                      ></span>
                     </td>
+                    @for (ci of columnIndices; track ci) {
+                      <td
+                        class="xlsx-cell"
+                        [class.xlsx-spill-cell]="isSpillCell(ri, ci)"
+                        [attr.title]="
+                          isSpillCell(ri, ci) ? ('NOTE_EDITOR.SPILL_CHILD' | translate) : null
+                        "
+                        [attr.rowspan]="getCellMerge(ri, ci).rows"
+                        [attr.colspan]="getCellMerge(ri, ci).columns"
+                        [style.display]="getCellMerge(ri, ci).hidden ? 'none' : null"
+                        [class.xlsx-cell-selected]="
+                          selectedCell()?.row === ri && selectedCell()?.col === ci
+                        "
+                        [class.xlsx-cell-in-range]="isCellInRange(ri, ci)"
+                        [class.xlsx-cell-numeric]="isCellNumeric(ri, ci)"
+                        [class.xlsx-cell-formula]="cellHasFormula(ri, ci)"
+                        [style.width.px]="getCellDimensions(ri, ci).width"
+                        [style.min-width.px]="getCellDimensions(ri, ci).width"
+                        [style.max-width.px]="getCellDimensions(ri, ci).width"
+                        [style.height.px]="getCellDimensions(ri, ci).height"
+                        [style.max-height]="
+                          getCellFormat(ri, ci).wrap
+                            ? 'none'
+                            : getCellDimensions(ri, ci).height + 'px'
+                        "
+                        [ngStyle]="getCellStyle(ri, ci)"
+                        (mousedown)="onCellMousedown($event, ri, ci)"
+                        (mouseenter)="onCellMouseenter(ri, ci)"
+                        (dblclick)="startEditCell(ri, ci)"
+                        (contextmenu)="onXlsxContextMenu($event, ri, ci)"
+                      >
+                        @if (editingCell()?.row === ri && editingCell()?.col === ci) {
+                          <input
+                            class="xlsx-cell-input"
+                            [value]="formulaBarValue()"
+                            (input)="onFormulaInput($any($event.target).value)"
+                            (keydown)="onCellKeydown($event)"
+                            (blur)="commitCellEdit(true)"
+                            #cellInput
+                          />
+                        } @else {
+                          <span class="xlsx-cell-value">{{ getCellDisplayValue(ri, ci) }}</span>
+                        }
+                      </td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+            @for (chart of activeCharts(); track chart.id) {
+              <section
+                class="xlsx-chart-object"
+                [class.selected]="selectedChart() === chart.id"
+                [attr.data-chart-id]="chart.id"
+                [style.left.px]="chartPosition(chart).left"
+                [style.top.px]="chartPosition(chart).top"
+                [style.width.px]="chart.anchor.width"
+                [style.height.px]="chart.anchor.height"
+                tabindex="0"
+                [attr.aria-label]="chart.title"
+                (click)="selectedChart.set(chart.id); $event.stopPropagation()"
+                (dblclick)="openChart(chart.id)"
+                (keydown)="$event.stopPropagation()"
+              >
+                <header class="xlsx-chart-handle" (mousedown)="startChartDrag($event, chart)">
+                  <span>{{ chart.title || ('NOTE_EDITOR.CHART_NEW' | translate) }}</span
+                  ><button
+                    class="chart-edit"
+                    [disabled]="xlsxSaving()"
+                    (mousedown)="$event.stopPropagation()"
+                    (click)="openChart(chart.id)"
+                    [attr.aria-label]="'NOTE_EDITOR.CHART_EDIT' | translate"
+                  >
+                    ✎</button
+                  ><button
+                    class="chart-delete"
+                    [disabled]="xlsxSaving()"
+                    (mousedown)="$event.stopPropagation()"
+                    (click)="deleteChart(chart.id)"
+                    [attr.aria-label]="'NOTE_EDITOR.CHART_DELETE' | translate"
+                  >
+                    ×
+                  </button>
+                </header>
+                <div class="xlsx-chart-canvas">
+                  @if (chart.error) {
+                    <p role="alert">{{ chartErrorKey(chart.error) | translate }}</p>
+                  } @else {
+                    <app-spreadsheet-chart-view [definition]="chart" [data]="chart.data" />
                   }
-                </tr>
-              }
-            </tbody>
-          </table>
-        }
-      </div>
-
-      <!-- Context menu -->
-      @if (xlsxContextMenu(); as ctx) {
-        <div class="xlsx-context-menu" [style.left.px]="ctx.x" [style.top.px]="ctx.y" (click)="$event.stopPropagation()">
-          <button class="xlsx-ctx-item" (click)="onContextMenuAction('cut')">
-            <span class="material-symbols-outlined text-sm">content_cut</span>
-            {{ 'NOTE_EDITOR.XLSX_CUT' | translate }}
-            <span class="xlsx-ctx-shortcut">Ctrl+X</span>
-          </button>
-          <button class="xlsx-ctx-item" (click)="onContextMenuAction('copy')">
-            <span class="material-symbols-outlined text-sm">content_copy</span>
-            {{ 'NOTE_EDITOR.XLSX_COPY' | translate }}
-            <span class="xlsx-ctx-shortcut">Ctrl+C</span>
-          </button>
-          <button class="xlsx-ctx-item" (click)="onContextMenuAction('paste')">
-            <span class="material-symbols-outlined text-sm">content_paste</span>
-            {{ 'NOTE_EDITOR.XLSX_PASTE' | translate }}
-            <span class="xlsx-ctx-shortcut">Ctrl+V</span>
-          </button>
-          <div class="xlsx-ctx-sep"></div>
-          <button class="xlsx-ctx-item" (click)="onContextMenuAction('delete')">
-            <span class="material-symbols-outlined text-sm">delete</span>
-            {{ 'NOTE_EDITOR.XLSX_DELETE' | translate }}
-          </button>
-          <div class="xlsx-ctx-sep"></div>
-          <button class="xlsx-ctx-item" (click)="onContextMenuAction('insertRowAbove')">
-            <span class="material-symbols-outlined text-sm">arrow_upward</span>
-            {{ 'NOTE_EDITOR.XLSX_INSERT_ROW_ABOVE' | translate }}
-          </button>
-          <button class="xlsx-ctx-item" (click)="onContextMenuAction('insertRowBelow')">
-            <span class="material-symbols-outlined text-sm">arrow_downward</span>
-            {{ 'NOTE_EDITOR.XLSX_INSERT_ROW_BELOW' | translate }}
-          </button>
-          <button class="xlsx-ctx-item" (click)="onContextMenuAction('insertColLeft')">
-            <span class="material-symbols-outlined text-sm">arrow_back</span>
-            {{ 'NOTE_EDITOR.XLSX_INSERT_COL_LEFT' | translate }}
-          </button>
-          <button class="xlsx-ctx-item" (click)="onContextMenuAction('insertColRight')">
-            <span class="material-symbols-outlined text-sm">arrow_forward</span>
-            {{ 'NOTE_EDITOR.XLSX_INSERT_COL_RIGHT' | translate }}
-          </button>
-          @if (xlsxSelectingFullRows()) {
-            <div class="xlsx-ctx-sep"></div>
-            <button class="xlsx-ctx-item" (click)="onContextMenuAction('moveRowUp')">
-              <span class="material-symbols-outlined text-sm">move_up</span>
-              {{ 'NOTE_EDITOR.XLSX_MOVE_ROW_UP' | translate }}
-            </button>
-            <button class="xlsx-ctx-item" (click)="onContextMenuAction('moveRowDown')">
-              <span class="material-symbols-outlined text-sm">move_down</span>
-              {{ 'NOTE_EDITOR.XLSX_MOVE_ROW_DOWN' | translate }}
-            </button>
-          }
-          @if (xlsxSelectingFullCols()) {
-            <div class="xlsx-ctx-sep"></div>
-            <button class="xlsx-ctx-item" (click)="onContextMenuAction('moveColLeft')">
-              <span class="material-symbols-outlined text-sm">keyboard_double_arrow_left</span>
-              {{ 'NOTE_EDITOR.XLSX_MOVE_COL_LEFT' | translate }}
-            </button>
-            <button class="xlsx-ctx-item" (click)="onContextMenuAction('moveColRight')">
-              <span class="material-symbols-outlined text-sm">keyboard_double_arrow_right</span>
-              {{ 'NOTE_EDITOR.XLSX_MOVE_COL_RIGHT' | translate }}
-            </button>
-          }
-          <div class="xlsx-ctx-sep"></div>
-          <button class="xlsx-ctx-item xlsx-ctx-danger" (click)="onContextMenuAction('deleteRow')">
-            <span class="material-symbols-outlined text-sm">remove</span>
-            {{ 'NOTE_EDITOR.XLSX_DELETE_ROW' | translate }}
-          </button>
-          <button class="xlsx-ctx-item xlsx-ctx-danger" (click)="onContextMenuAction('deleteCol')">
-            <span class="material-symbols-outlined text-sm">remove</span>
-            {{ 'NOTE_EDITOR.XLSX_DELETE_COL' | translate }}
-          </button>
-        </div>
-      }
-
-      <!-- Sheet tabs + status bar -->
-      <div class="xlsx-status-bar flex items-center flex-shrink-0">
-        <div class="xlsx-sheet-tabs flex items-center flex-1 overflow-x-auto">
-          <div class="xlsx-sheet-nav flex items-center">
-            <button class="xlsx-sheet-nav-btn" (click)="selectSheet(0)">
-              <span class="material-symbols-outlined" style="font-size: 11px;">first_page</span>
-            </button>
-            <button class="xlsx-sheet-nav-btn" (click)="selectSheet(Math.max(0, activeSheetIndex() - 1))">
-              <span class="material-symbols-outlined" style="font-size: 11px;">chevron_left</span>
-            </button>
-            <button class="xlsx-sheet-nav-btn" (click)="selectSheet(Math.min(xlsxSheets().length - 1, activeSheetIndex() + 1))">
-              <span class="material-symbols-outlined" style="font-size: 11px;">chevron_right</span>
-            </button>
-            <button class="xlsx-sheet-nav-btn" (click)="selectSheet(xlsxSheets().length - 1)">
-              <span class="material-symbols-outlined" style="font-size: 11px;">last_page</span>
-            </button>
-          </div>
-          @for (sh of xlsxSheets(); track $index; let si = $index) {
-            <button
-              class="xlsx-sheet-tab"
-              [class.xlsx-sheet-tab-active]="activeSheetIndex() === si"
-              (click)="selectSheet(si)"
-            >
-              {{ sh.name }}
-            </button>
-          }
-        </div>
-        <div class="xlsx-status-info">
-          @if (selectedCell(); as sc) {
-            @if (xlsxStatusSum !== null) {
-              <span class="xlsx-status-item">{{ 'XLSX_SUM_LABEL' | translate }}={{ xlsxStatusSum }}</span>
+                </div>
+                <button
+                  class="xlsx-chart-resize"
+                  (mousedown)="startChartDrag($event, chart, true)"
+                  [attr.aria-label]="'NOTE_EDITOR.CHART_SIZE' | translate"
+                >
+                  ◢
+                </button>
+              </section>
             }
-            @if (xlsxStatusAverage !== null) {
-              <span class="xlsx-status-item">{{ 'XLSX_AVERAGE_LABEL' | translate }}={{ xlsxStatusAverage | number:'1.0-2' }}</span>
-            }
-            <span class="xlsx-status-item">{{ 'XLSX_COUNT_LABEL' | translate }}={{ xlsxStatusCount }}</span>
           }
         </div>
-      </div>
-    </div>
-    } @else {
-    <!-- Toolbar -->
-    <div
-      class="flex items-center gap-1 px-4 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex-shrink-0 flex-wrap"
-    >
-      <!-- Heading / Paragraph select -->
-      <select
-        class="h-7 px-2 text-xs rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-        (change)="onFormatBlock($any($event.target).value); $any($event.target).value = activeBlockFormat()"
-        [value]="activeBlockFormat()"
-      >
-        <option value="p">{{ 'NOTE_EDITOR.PARAGRAPH' | translate }}</option>
-        <option value="h1">{{ 'NOTE_EDITOR.HEADING1' | translate }}</option>
-        <option value="h2">{{ 'NOTE_EDITOR.HEADING2' | translate }}</option>
-        <option value="h3">{{ 'NOTE_EDITOR.HEADING3' | translate }}</option>
-      </select>
 
-      <!-- Font size select -->
-      <select
-        class="h-7 px-2 text-xs rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-        (change)="onFontSize($any($event.target).value)"
-        [value]="activeFontSize()"
-      >
-        <option value="1">10px</option>
-        <option value="2">13px</option>
-        <option value="3">16px</option>
-        <option value="4">18px</option>
-        <option value="5">24px</option>
-        <option value="6">32px</option>
-        <option value="7">48px</option>
-      </select>
-
-      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-      <!-- Text style buttons -->
-      <button
-        class="toolbar-btn"
-        [class.active]="isBold()"
-        [title]="'NOTE_EDITOR.BOLD' | translate"
-        (click)="execCommand('bold')"
-      >
-        <span class="material-symbols-outlined text-base">format_bold</span>
-      </button>
-      <button
-        class="toolbar-btn"
-        [class.active]="isItalic()"
-        [title]="'NOTE_EDITOR.ITALIC' | translate"
-        (click)="execCommand('italic')"
-      >
-        <span class="material-symbols-outlined text-base">format_italic</span>
-      </button>
-      <button
-        class="toolbar-btn"
-        [class.active]="isUnderline()"
-        [title]="'NOTE_EDITOR.UNDERLINE' | translate"
-        (click)="execCommand('underline')"
-      >
-        <span class="material-symbols-outlined text-base">format_underlined</span>
-      </button>
-      <button
-        class="toolbar-btn"
-        [class.active]="isStrike()"
-        [title]="'NOTE_EDITOR.STRIKETHROUGH' | translate"
-        (click)="execCommand('strikeThrough')"
-      >
-        <span class="material-symbols-outlined text-base">strikethrough_s</span>
-      </button>
-
-      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-      <!-- Text color -->
-      <div class="relative toolbar-btn p-0">
-        <input
-          type="color"
-          class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-          [value]="activeTextColor()"
-          (input)="onTextColor($any($event.target).value)"
-          [title]="'NOTE_EDITOR.TEXT_COLOR' | translate"
-        />
-        <span class="material-symbols-outlined text-base pointer-events-none">format_color_text</span>
-        <div
-          class="absolute bottom-0.5 left-1 right-1 h-0.5 rounded"
-          [style.background]="activeTextColor()"
-        ></div>
-      </div>
-
-      <!-- Highlight / background color -->
-      <div class="relative toolbar-btn p-0">
-        <input
-          type="color"
-          class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-          value="#ffff00"
-          (input)="onHighlightColor($any($event.target).value)"
-          [title]="'NOTE_EDITOR.HIGHLIGHT_COLOR' | translate"
-        />
-        <span class="material-symbols-outlined text-base pointer-events-none">format_color_fill</span>
-      </div>
-
-      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-      <!-- Alignment -->
-      <button
-        class="toolbar-btn"
-        [class.active]="activeAlign() === 'left'"
-        [title]="'NOTE_EDITOR.ALIGN_LEFT' | translate"
-        (click)="execCommand('justifyLeft')"
-      >
-        <span class="material-symbols-outlined text-base">format_align_left</span>
-      </button>
-      <button
-        class="toolbar-btn"
-        [class.active]="activeAlign() === 'center'"
-        [title]="'NOTE_EDITOR.ALIGN_CENTER' | translate"
-        (click)="execCommand('justifyCenter')"
-      >
-        <span class="material-symbols-outlined text-base">format_align_center</span>
-      </button>
-      <button
-        class="toolbar-btn"
-        [class.active]="activeAlign() === 'right'"
-        [title]="'NOTE_EDITOR.ALIGN_RIGHT' | translate"
-        (click)="execCommand('justifyRight')"
-      >
-        <span class="material-symbols-outlined text-base">format_align_right</span>
-      </button>
-      <button
-        class="toolbar-btn"
-        [class.active]="activeAlign() === 'justify'"
-        [title]="'NOTE_EDITOR.JUSTIFY' | translate"
-        (click)="execCommand('justifyFull')"
-      >
-        <span class="material-symbols-outlined text-base">format_align_justify</span>
-      </button>
-
-      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-      <!-- Lists -->
-      <button
-        class="toolbar-btn"
-        [class.active]="isUnorderedList()"
-        [title]="'NOTE_EDITOR.BULLET_LIST' | translate"
-        (click)="execCommand('insertUnorderedList')"
-      >
-        <span class="material-symbols-outlined text-base">format_list_bulleted</span>
-      </button>
-      <button
-        class="toolbar-btn"
-        [class.active]="isOrderedList()"
-        [title]="'NOTE_EDITOR.NUMBERED_LIST' | translate"
-        (click)="execCommand('insertOrderedList')"
-      >
-        <span class="material-symbols-outlined text-base">format_list_numbered</span>
-      </button>
-
-      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-      <!-- Indent -->
-      <button class="toolbar-btn" [title]="'NOTE_EDITOR.INDENT' | translate" (click)="execCommand('indent')">
-        <span class="material-symbols-outlined text-base">format_indent_increase</span>
-      </button>
-      <button class="toolbar-btn" [title]="'NOTE_EDITOR.OUTDENT' | translate" (click)="execCommand('outdent')">
-        <span class="material-symbols-outlined text-base">format_indent_decrease</span>
-      </button>
-
-      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-      <!-- Clear formatting -->
-      <button class="toolbar-btn" [title]="'NOTE_EDITOR.CLEAR_FORMAT' | translate" (click)="clearFormatting()">
-        <span class="material-symbols-outlined text-base">format_clear</span>
-      </button>
-
-      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-      <!-- Insert image -->
-      <button class="toolbar-btn" [title]="'NOTE_EDITOR.INSERT_IMAGE' | translate" (click)="insertImageFromFile()">
-        <span class="material-symbols-outlined text-base">image</span>
-      </button>
-
-      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-      <!-- Word wrap toggle -->
-      <button
-        class="toolbar-btn"
-        [class.active]="wordWrap()"
-        [title]="wordWrap() ? ('NOTE_EDITOR.SCROLL_HORIZONTAL' | translate) : ('NOTE_EDITOR.WORD_WRAP' | translate)"
-        (click)="wordWrap.set(!wordWrap())"
-      >
-        <span class="material-symbols-outlined text-base">wrap_text</span>
-      </button>
-
-      <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
-
-      <!-- AI Chat toggle -->
-      <button
-        class="toolbar-btn"
-        [title]="'NOTE_EDITOR.AI_ASSISTANT' | translate"
-        (click)="aiChatToggle.emit()"
-      >
-        <span class="material-symbols-outlined text-base">smart_toy</span>
-      </button>
-
-      <button
-        class="toolbar-btn"
-        [disabled]="printing()"
-        [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate"
-        (click)="printCurrentDocument()"
-      >
-        <span class="material-symbols-outlined text-base">print</span>
-      </button>
-
-      <!-- Spacer to push download to the right -->
-      <div class="flex-1"></div>
-
-      <!-- Download dropdown -->
-      <div class="relative" #downloadDropdown>
-        <button
-          class="toolbar-btn !w-auto px-2 gap-1"
-          [title]="'NOTE_EDITOR.DOWNLOAD_NOTE' | translate"
-          (click)="showDownloadMenu.set(!showDownloadMenu())"
-        >
-          <span class="material-symbols-outlined text-base">download</span>
-          <span class="material-symbols-outlined text-xs">expand_more</span>
-        </button>
-        @if (showDownloadMenu()) {
+        <!-- Context menu -->
+        @if (xlsxContextMenu(); as ctx) {
           <div
-            class="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg py-1 min-w-[160px]"
+            class="xlsx-context-menu"
+            [style.left.px]="ctx.x"
+            [style.top.px]="ctx.y"
+            (click)="$event.stopPropagation()"
           >
+            <button class="xlsx-ctx-item" (click)="onContextMenuAction('cut')">
+              <span class="material-symbols-outlined text-sm">content_cut</span>
+              {{ 'NOTE_EDITOR.XLSX_CUT' | translate }}
+              <span class="xlsx-ctx-shortcut">Ctrl+X</span>
+            </button>
+            <button class="xlsx-ctx-item" (click)="onContextMenuAction('copy')">
+              <span class="material-symbols-outlined text-sm">content_copy</span>
+              {{ 'NOTE_EDITOR.XLSX_COPY' | translate }}
+              <span class="xlsx-ctx-shortcut">Ctrl+C</span>
+            </button>
+            <button class="xlsx-ctx-item" (click)="onContextMenuAction('paste')">
+              <span class="material-symbols-outlined text-sm">content_paste</span>
+              {{ 'NOTE_EDITOR.XLSX_PASTE' | translate }}
+              <span class="xlsx-ctx-shortcut">Ctrl+V</span>
+            </button>
+            <div class="xlsx-ctx-sep"></div>
+            <button class="xlsx-ctx-item" (click)="onContextMenuAction('delete')">
+              <span class="material-symbols-outlined text-sm">delete</span>
+              {{ 'NOTE_EDITOR.XLSX_DELETE' | translate }}
+            </button>
+            <div class="xlsx-ctx-sep"></div>
+            <button class="xlsx-ctx-item" (click)="onContextMenuAction('insertRowAbove')">
+              <span class="material-symbols-outlined text-sm">arrow_upward</span>
+              {{ 'NOTE_EDITOR.XLSX_INSERT_ROW_ABOVE' | translate }}
+            </button>
+            <button class="xlsx-ctx-item" (click)="onContextMenuAction('insertRowBelow')">
+              <span class="material-symbols-outlined text-sm">arrow_downward</span>
+              {{ 'NOTE_EDITOR.XLSX_INSERT_ROW_BELOW' | translate }}
+            </button>
+            <button class="xlsx-ctx-item" (click)="onContextMenuAction('insertColLeft')">
+              <span class="material-symbols-outlined text-sm">arrow_back</span>
+              {{ 'NOTE_EDITOR.XLSX_INSERT_COL_LEFT' | translate }}
+            </button>
+            <button class="xlsx-ctx-item" (click)="onContextMenuAction('insertColRight')">
+              <span class="material-symbols-outlined text-sm">arrow_forward</span>
+              {{ 'NOTE_EDITOR.XLSX_INSERT_COL_RIGHT' | translate }}
+            </button>
+            @if (xlsxSelectingFullRows()) {
+              <div class="xlsx-ctx-sep"></div>
+              <button class="xlsx-ctx-item" (click)="onContextMenuAction('moveRowUp')">
+                <span class="material-symbols-outlined text-sm">move_up</span>
+                {{ 'NOTE_EDITOR.XLSX_MOVE_ROW_UP' | translate }}
+              </button>
+              <button class="xlsx-ctx-item" (click)="onContextMenuAction('moveRowDown')">
+                <span class="material-symbols-outlined text-sm">move_down</span>
+                {{ 'NOTE_EDITOR.XLSX_MOVE_ROW_DOWN' | translate }}
+              </button>
+            }
+            @if (xlsxSelectingFullCols()) {
+              <div class="xlsx-ctx-sep"></div>
+              <button class="xlsx-ctx-item" (click)="onContextMenuAction('moveColLeft')">
+                <span class="material-symbols-outlined text-sm">keyboard_double_arrow_left</span>
+                {{ 'NOTE_EDITOR.XLSX_MOVE_COL_LEFT' | translate }}
+              </button>
+              <button class="xlsx-ctx-item" (click)="onContextMenuAction('moveColRight')">
+                <span class="material-symbols-outlined text-sm">keyboard_double_arrow_right</span>
+                {{ 'NOTE_EDITOR.XLSX_MOVE_COL_RIGHT' | translate }}
+              </button>
+            }
+            <div class="xlsx-ctx-sep"></div>
             <button
-              class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
-              (click)="downloadAsTxt()"
+              class="xlsx-ctx-item xlsx-ctx-danger"
+              (click)="onContextMenuAction('deleteRow')"
             >
-              <span class="material-symbols-outlined text-sm">description</span>
-              {{ 'NOTE_EDITOR.PLAIN_TEXT' | translate }}
+              <span class="material-symbols-outlined text-sm">remove</span>
+              {{ 'NOTE_EDITOR.XLSX_DELETE_ROW' | translate }}
             </button>
             <button
-              class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
-              (click)="downloadAsHtml()"
+              class="xlsx-ctx-item xlsx-ctx-danger"
+              (click)="onContextMenuAction('deleteCol')"
             >
-              <span class="material-symbols-outlined text-sm">code</span>
-              {{ 'NOTE_EDITOR.HTML_DOC' | translate }}
-            </button>
-            <button
-              class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
-              (click)="downloadAsDocx()"
-            >
-              <span class="material-symbols-outlined text-sm">article</span>
-              {{ 'NOTE_EDITOR.WORD_DOC' | translate }}
-            </button>
-            <button
-              class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
-              (click)="downloadAsPptx()"
-            >
-              <span class="material-symbols-outlined text-sm">slideshow</span>
-              {{ 'NOTE_EDITOR.POWERPOINT_DOC' | translate }}
-            </button>
-            <button
-              class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
-              (click)="downloadAsPdf()"
-            >
-              <span class="material-symbols-outlined text-sm">picture_as_pdf</span>
-              {{ 'NOTE_EDITOR.PDF_DOC' | translate }}
-            </button>
-            <button
-              class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
-              (click)="downloadAsXlsx()"
-            >
-              <span class="material-symbols-outlined text-sm">table_chart</span>
-              {{ 'NOTE_EDITOR.EXCEL_DOC' | translate }}
-            </button>
-            <div class="border-t border-slate-200 dark:border-slate-700 my-1"></div>
-            <button
-              class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
-              (click)="downloadAsJson()"
-            >
-              <span class="material-symbols-outlined text-sm">data_object</span>
-              {{ 'NOTE_EDITOR.JSON_DOC' | translate }}
+              <span class="material-symbols-outlined text-sm">remove</span>
+              {{ 'NOTE_EDITOR.XLSX_DELETE_COL' | translate }}
             </button>
           </div>
         }
-      </div>
-    </div>
 
-    <!-- Editor Content Area -->
-    <div class="flex-1 overflow-y-auto overflow-x-auto custom-scrollbar">
-      <div class="px-6 py-8">
-        <div class="mb-8"
-          [style.word-wrap]="wordWrap() ? 'break-word' : 'normal'"
-          [style.overflow-wrap]="wordWrap() ? 'break-word' : 'normal'"
-          [style.white-space]="wordWrap() ? 'normal' : 'nowrap'"
-        >
-          @if (folderName(); as fname) {
-            <div
-              class="flex items-center gap-2 text-xs font-medium text-primary uppercase tracking-widest mb-4"
+        <!-- Sheet tabs + status bar -->
+        <div class="xlsx-status-bar flex items-center flex-shrink-0">
+          <div class="xlsx-sheet-tabs flex items-center flex-1 overflow-x-auto">
+            <div class="xlsx-sheet-nav flex items-center">
+              <button class="xlsx-sheet-nav-btn" (click)="selectSheet(0)">
+                <span class="material-symbols-outlined" style="font-size: 11px">first_page</span>
+              </button>
+              <button
+                class="xlsx-sheet-nav-btn"
+                (click)="selectSheet(Math.max(0, activeSheetIndex() - 1))"
+              >
+                <span class="material-symbols-outlined" style="font-size: 11px">chevron_left</span>
+              </button>
+              <button
+                class="xlsx-sheet-nav-btn"
+                (click)="selectSheet(Math.min(xlsxSheets().length - 1, activeSheetIndex() + 1))"
+              >
+                <span class="material-symbols-outlined" style="font-size: 11px">chevron_right</span>
+              </button>
+              <button class="xlsx-sheet-nav-btn" (click)="selectSheet(xlsxSheets().length - 1)">
+                <span class="material-symbols-outlined" style="font-size: 11px">last_page</span>
+              </button>
+            </div>
+            @for (sh of xlsxSheets(); track $index; let si = $index) {
+              <button
+                class="xlsx-sheet-tab"
+                [class.xlsx-sheet-tab-active]="activeSheetIndex() === si"
+                (click)="selectSheet(si)"
+              >
+                {{ sh.name }}
+              </button>
+            }
+          </div>
+          <div class="xlsx-status-info">
+            @if (selectedCell(); as sc) {
+              @if (xlsxStatusSum !== null) {
+                <span class="xlsx-status-item"
+                  >{{ 'XLSX_SUM_LABEL' | translate }}={{ xlsxStatusSum }}</span
+                >
+              }
+              @if (xlsxStatusAverage !== null) {
+                <span class="xlsx-status-item"
+                  >{{ 'XLSX_AVERAGE_LABEL' | translate }}={{
+                    xlsxStatusAverage | number: '1.0-2'
+                  }}</span
+                >
+              }
+              <span class="xlsx-status-item"
+                >{{ 'XLSX_COUNT_LABEL' | translate }}={{ xlsxStatusCount }}</span
+              >
+            }
+          </div>
+        </div>
+        @if (pivotDraft(); as draft) {
+          <div class="xlsx-pivot-backdrop">
+            <section
+              class="xlsx-pivot-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="pivot-title"
+              (keydown)="onPivotKeydown($event)"
             >
-              <span class="material-symbols-outlined text-sm">folder</span>
-              {{ fname }}
+              <header>
+                <h2 id="pivot-title">{{ 'NOTE_EDITOR.PIVOT_TITLE' | translate }}</h2>
+                <button
+                  [disabled]="pivotBusy()"
+                  (click)="closePivot()"
+                  [attr.aria-label]="'NOTE_EDITOR.PIVOT_CANCEL' | translate"
+                >
+                  ×
+                </button>
+              </header>
+              <div class="xlsx-pivot-layout">
+                <fieldset [disabled]="pivotBusy()" class="xlsx-pivot-form">
+                  <label
+                    >{{ 'NOTE_EDITOR.PIVOT_NAME_LABEL' | translate
+                    }}<input
+                      class="pivot-name"
+                      [value]="draft.name"
+                      maxlength="80"
+                      (input)="changePivot({ name: $any($event.target).value })"
+                  /></label>
+                  <label
+                    >{{ 'NOTE_EDITOR.PIVOT_SOURCE_LABEL' | translate
+                    }}<select
+                      class="pivot-source"
+                      [value]="draft.sourceSheet"
+                      (change)="changePivotSource($any($event.target).value)"
+                    >
+                      @for (sheet of xlsxSheets(); track sheet.name) {
+                        <option [value]="sheet.name" [selected]="sheet.name === draft.sourceSheet">
+                          {{ sheet.name }}
+                        </option>
+                      }
+                    </select></label
+                  >
+                  <label
+                    >{{ 'NOTE_EDITOR.PIVOT_RANGE_LABEL' | translate
+                    }}<input
+                      class="pivot-range"
+                      [value]="draft.sourceRange"
+                      placeholder="A1:F100"
+                      (change)="changePivot({ sourceRange: $any($event.target).value })"
+                  /></label>
+                  <p>{{ 'NOTE_EDITOR.PIVOT_HEADER_HELP' | translate }}</p>
+                  <h3>{{ 'NOTE_EDITOR.PIVOT_FIELDS_LABEL' | translate }}</h3>
+                  <div class="xlsx-pivot-fields">
+                    @for (field of pivotHeaders(); track $index; let index = $index) {
+                      <div class="xlsx-pivot-field">
+                        <span>{{ field || '#' + (index + 1) }}</span
+                        ><label
+                          ><input
+                            type="checkbox"
+                            class="pivot-row-field"
+                            [attr.data-field]="index"
+                            [checked]="draft.rows.includes(index)"
+                            (change)="togglePivotField('rows', index)"
+                          />{{ 'NOTE_EDITOR.PIVOT_ROWS' | translate }}</label
+                        ><label
+                          ><input
+                            type="checkbox"
+                            class="pivot-column-field"
+                            [attr.data-field]="index"
+                            [checked]="draft.columns.includes(index)"
+                            (change)="togglePivotField('columns', index)"
+                          />{{ 'NOTE_EDITOR.PIVOT_COLUMNS' | translate }}</label
+                        >
+                      </div>
+                    }
+                  </div>
+                  @for (axis of ['rows', 'columns']; track axis) {
+                    <div class="xlsx-pivot-levels">
+                      <strong>{{ 'NOTE_EDITOR.PIVOT_' + axis.toUpperCase() | translate }}</strong>
+                      @for (field of $any(draft)[axis]; track field; let index = $index) {
+                        <span
+                          >{{ pivotHeaders()[field]
+                          }}<button
+                            [disabled]="index === 0"
+                            (click)="movePivotField($any(axis), index, -1)"
+                            [attr.aria-label]="'NOTE_EDITOR.PIVOT_MOVE_UP' | translate"
+                          >
+                            ↑</button
+                          ><button
+                            [disabled]="index === $any(draft)[axis].length - 1"
+                            (click)="movePivotField($any(axis), index, 1)"
+                            [attr.aria-label]="'NOTE_EDITOR.PIVOT_MOVE_DOWN' | translate"
+                          >
+                            ↓
+                          </button></span
+                        >
+                      }
+                    </div>
+                  }
+                  <h3>{{ 'NOTE_EDITOR.PIVOT_VALUES' | translate }}</h3>
+                  @for (value of draft.values; track $index; let index = $index) {
+                    <div class="xlsx-pivot-value">
+                      <select
+                        class="pivot-value-field"
+                        [attr.aria-label]="'NOTE_EDITOR.PIVOT_VALUE_FIELD' | translate"
+                        [value]="value.field"
+                        (change)="changePivotValue(index, { field: +$any($event.target).value })"
+                      >
+                        @for (field of pivotHeaders(); track $index; let fieldIndex = $index) {
+                          <option [value]="fieldIndex" [selected]="fieldIndex === value.field">
+                            {{ field }}
+                          </option>
+                        }</select
+                      ><select
+                        class="pivot-aggregate"
+                        [attr.aria-label]="'NOTE_EDITOR.PIVOT_AGGREGATE' | translate"
+                        [value]="value.aggregate"
+                        (change)="changePivotValue(index, { aggregate: $any($event.target).value })"
+                      >
+                        @for (aggregate of pivotAggregates; track aggregate) {
+                          <option [value]="aggregate" [selected]="aggregate === value.aggregate">
+                            {{ 'NOTE_EDITOR.PIVOT_AGG_' + aggregate | translate }}
+                          </option>
+                        }</select
+                      ><button
+                        [disabled]="draft.values.length === 1"
+                        (click)="changePivotValue(index, null)"
+                        [attr.aria-label]="'NOTE_EDITOR.PIVOT_REMOVE' | translate"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  }
+                  <button
+                    class="pivot-add-value"
+                    [disabled]="draft.values.length >= 8"
+                    (click)="changePivotValue(draft.values.length, {})"
+                  >
+                    {{ 'NOTE_EDITOR.PIVOT_ADD_VALUE' | translate }}
+                  </button>
+                  <h3>{{ 'NOTE_EDITOR.PIVOT_FILTERS' | translate }}</h3>
+                  @for (filter of draft.filters; track $index; let index = $index) {
+                    <div class="xlsx-pivot-value">
+                      <select
+                        [attr.aria-label]="'NOTE_EDITOR.PIVOT_FILTER_FIELD' | translate"
+                        [value]="filter.field"
+                        (change)="changePivotFilter(index, +$any($event.target).value)"
+                      >
+                        @for (field of pivotHeaders(); track $index; let fieldIndex = $index) {
+                          <option [value]="fieldIndex" [selected]="fieldIndex === filter.field">
+                            {{ field }}
+                          </option>
+                        }</select
+                      ><select
+                        class="pivot-filter-value"
+                        [attr.aria-label]="'NOTE_EDITOR.PIVOT_FILTER_VALUE' | translate"
+                        [value]="pivotFilterKey(filter.value)"
+                        (change)="changePivotFilter(index, filter.field, $any($event.target).value)"
+                      >
+                        @for (option of pivotFilterOptions(filter.field); track option.value) {
+                          <option
+                            [value]="option.value"
+                            [selected]="option.value === pivotFilterKey(filter.value)"
+                          >
+                            {{ option.label }}
+                          </option>
+                        }</select
+                      ><button
+                        (click)="removePivotFilter(index)"
+                        [attr.aria-label]="'NOTE_EDITOR.PIVOT_REMOVE' | translate"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  }
+                  <button class="pivot-add-filter" (click)="addPivotFilter()">
+                    {{ 'NOTE_EDITOR.PIVOT_ADD_FILTER' | translate }}
+                  </button>
+                  <label class="xlsx-pivot-totals"
+                    ><input
+                      type="checkbox"
+                      [checked]="draft.totals"
+                      (change)="changePivot({ totals: $any($event.target).checked })"
+                    />{{ 'NOTE_EDITOR.PIVOT_TOTALS' | translate }}</label
+                  >
+                </fieldset>
+                <div class="xlsx-pivot-preview">
+                  <h3>{{ 'NOTE_EDITOR.PIVOT_PREVIEW' | translate }}</h3>
+                  @if (pivotPreview(); as preview) {
+                    <p>
+                      {{ preview.matched }} {{ 'NOTE_EDITOR.PIVOT_RECORDS' | translate }} ·
+                      {{ preview.rows }} × {{ preview.columns }}
+                    </p>
+                    <div class="xlsx-pivot-preview-scroll">
+                      <table>
+                        @for (row of preview.matrix; track $index) {
+                          <tr>
+                            @for (cell of row; track $index) {
+                              <td>{{ cell }}</td>
+                            }
+                          </tr>
+                        }
+                      </table>
+                    </div>
+                    @if (preview.rows > 51 || preview.columns > 31) {
+                      <p>{{ 'NOTE_EDITOR.PIVOT_PREVIEW_LIMIT' | translate }}</p>
+                    }
+                  } @else {
+                    <p>{{ 'NOTE_EDITOR.PIVOT_PREVIEW_HELP' | translate }}</p>
+                  }
+                  <p>{{ 'NOTE_EDITOR.PIVOT_OUTPUT_HELP' | translate }}</p>
+                </div>
+              </div>
+              @if (pivotError(); as error) {
+                <p class="xlsx-pivot-error" role="alert">{{ error | translate }}</p>
+              }
+              <footer>
+                <button [disabled]="pivotBusy()" (click)="closePivot()">
+                  {{ 'NOTE_EDITOR.PIVOT_CANCEL' | translate }}</button
+                ><button
+                  class="pivot-preview-button"
+                  [disabled]="pivotBusy()"
+                  (click)="previewPivot()"
+                >
+                  {{ 'NOTE_EDITOR.PIVOT_PREVIEW' | translate }}</button
+                ><button class="pivot-save-button" [disabled]="pivotBusy()" (click)="savePivot()">
+                  {{
+                    (pivotBusy() ? 'NOTE_EDITOR.PIVOT_WORKING' : 'NOTE_EDITOR.PIVOT_SAVE')
+                      | translate
+                  }}
+                </button>
+              </footer>
+            </section>
+          </div>
+        }
+        @if (tableDraft(); as draft) {
+          <div class="xlsx-pivot-backdrop">
+            <section
+              class="xlsx-pivot-panel xlsx-table-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="xlsx-table-title"
+            >
+              <header>
+                <h2 id="xlsx-table-title">
+                  {{
+                    (draft.source ? 'NOTE_EDITOR.TABLE_RESIZE' : 'NOTE_EDITOR.TABLE_NEW')
+                      | translate
+                  }}: {{ draft.name }}
+                </h2>
+              </header>
+              <p>{{ 'NOTE_EDITOR.TABLE_RANGE_HINT' | translate }}</p>
+              <label
+                >{{ 'NOTE_EDITOR.TABLE_NAME' | translate }}
+                <input
+                  class="xlsx-table-name"
+                  [value]="draft.name"
+                  (input)="setTableField('name', $any($event.target).value)"
+                />
+              </label>
+              <label
+                >{{ 'NOTE_EDITOR.TABLE_RANGE' | translate }}
+                <input
+                  class="xlsx-table-range"
+                  [value]="draft.ref"
+                  (input)="setTableRange($any($event.target).value)"
+                  (keydown.enter)="saveTableResize()"
+                  (keydown.escape)="tableDraft.set(null)"
+                />
+              </label>
+              <label class="xlsx-table-totals-toggle"
+                ><input
+                  type="checkbox"
+                  [checked]="draft.totals"
+                  (change)="toggleTableTotals($any($event.target).checked)"
+                />{{ 'NOTE_EDITOR.TABLE_TOTALS' | translate }}</label
+              >
+              @if (draft.totals) {
+                <div class="xlsx-table-aggregates">
+                  @for (column of tableDraftColumns(); track $index) {
+                    <label
+                      >{{ column }}
+                      <select
+                        [value]="draft.aggregates[column] || ''"
+                        (change)="setTableAggregate(column, $any($event.target).value)"
+                      >
+                        @for (fn of tableTotalFunctions; track fn) {
+                          <option [value]="fn" [selected]="fn === (draft.aggregates[column] || '')">
+                            {{ 'NOTE_EDITOR.TABLE_AGG_' + (fn || 'none') | translate }}
+                          </option>
+                        }
+                        @if (draft.aggregates[column] === 'custom') {
+                          <option value="custom" [selected]="draft.aggregates[column] === 'custom'">
+                            {{ 'NOTE_EDITOR.TABLE_AGG_custom' | translate }}
+                          </option>
+                        }
+                      </select>
+                    </label>
+                  }
+                </div>
+              }
+              @if (tableError(); as error) {
+                <p role="alert">{{ error | translate }}</p>
+              }
+              <footer>
+                <button (click)="tableDraft.set(null)">
+                  {{ 'NOTE_EDITOR.PIVOT_CANCEL' | translate }}</button
+                ><button
+                  class="pivot-save-button"
+                  [disabled]="xlsxSaving()"
+                  (click)="saveTableResize()"
+                >
+                  {{ 'NOTE_EDITOR.TABLE_SAVE' | translate }}
+                </button>
+              </footer>
+            </section>
+          </div>
+        }
+        @if (chartDraft(); as draft) {
+          <div class="xlsx-pivot-backdrop">
+            <section
+              class="xlsx-pivot-panel xlsx-chart-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="chart-title"
+              (keydown)="onChartKeydown($event)"
+            >
+              <header>
+                <h2 id="chart-title">{{ 'NOTE_EDITOR.CHART_TITLE' | translate }}</h2>
+                <button
+                  [disabled]="chartBusy()"
+                  (click)="closeChart()"
+                  [attr.aria-label]="'NOTE_EDITOR.PIVOT_CANCEL' | translate"
+                >
+                  ×
+                </button>
+              </header>
+              <div class="xlsx-pivot-layout">
+                <fieldset class="xlsx-pivot-form" [disabled]="chartBusy()">
+                  <label
+                    >{{ 'NOTE_EDITOR.CHART_NAME' | translate
+                    }}<input
+                      class="chart-title-input"
+                      maxlength="160"
+                      [value]="draft.title"
+                      (input)="changeChart({ title: $any($event.target).value })"
+                  /></label>
+                  <label
+                    >{{ 'NOTE_EDITOR.CHART_TYPE' | translate
+                    }}<select
+                      class="chart-type"
+                      (change)="changeChart({ type: $any($event.target).value })"
+                    >
+                      @for (type of chartTypes; track type) {
+                        <option [value]="type" [selected]="draft.type === type">
+                          {{ 'NOTE_EDITOR.CHART_TYPE_' + type | translate }}
+                        </option>
+                      }
+                    </select></label
+                  >
+                  <label
+                    >{{ 'NOTE_EDITOR.PIVOT_SOURCE_LABEL' | translate
+                    }}<select
+                      class="chart-source"
+                      (change)="changeChartSource($any($event.target).value)"
+                    >
+                      @for (sheet of xlsxSheets(); track sheet.name) {
+                        <option [value]="sheet.name" [selected]="draft.sourceSheet === sheet.name">
+                          {{ sheet.name }}
+                        </option>
+                      }
+                    </select></label
+                  >
+                  <label
+                    >{{ 'NOTE_EDITOR.PIVOT_RANGE_LABEL' | translate
+                    }}<input
+                      class="chart-range"
+                      [value]="draft.sourceRange"
+                      (change)="changeChart({ sourceRange: $any($event.target).value })"
+                      placeholder="A1:D10"
+                  /></label>
+                  <label class="chart-check"
+                    ><input
+                      type="checkbox"
+                      [checked]="draft.headers"
+                      (change)="changeChart({ headers: $any($event.target).checked })"
+                    />{{ 'NOTE_EDITOR.CHART_HEADERS' | translate }}</label
+                  >
+                  <label
+                    >{{ 'NOTE_EDITOR.CHART_CATEGORY' | translate
+                    }}<select
+                      class="chart-category"
+                      (change)="changeChartCategory(+$any($event.target).value)"
+                    >
+                      @for (field of chartFields(); track $index) {
+                        <option [value]="$index" [selected]="draft.category === $index">
+                          {{ field }}
+                        </option>
+                      }
+                    </select></label
+                  >
+                  <h3>{{ 'NOTE_EDITOR.CHART_SERIES' | translate }}</h3>
+                  @for (field of chartFields(); track $index; let i = $index) {
+                    <label class="chart-check"
+                      ><input
+                        type="checkbox"
+                        [checked]="draft.series.includes(i)"
+                        [disabled]="i === draft.category"
+                        (change)="toggleChartSeries(i)"
+                      />{{ field }}</label
+                    >
+                  }
+                  <h3>{{ 'NOTE_EDITOR.CHART_COLORS' | translate }}</h3>
+                  <div class="chart-colors">
+                    @for (color of draft.colors; track $index; let i = $index) {
+                      <input
+                        type="color"
+                        [value]="color"
+                        (input)="changeChartColor(i, $any($event.target).value)"
+                        [attr.aria-label]="('NOTE_EDITOR.CHART_COLORS' | translate) + ' ' + (i + 1)"
+                      />
+                    }
+                  </div>
+                  @if (draft.type !== 'pie' && draft.type !== 'doughnut') {
+                    <label
+                      >{{ 'NOTE_EDITOR.CHART_X_TITLE' | translate
+                      }}<input
+                        maxlength="160"
+                        [value]="draft.xTitle"
+                        (input)="changeChart({ xTitle: $any($event.target).value })"
+                    /></label>
+                    <label
+                      >{{ 'NOTE_EDITOR.CHART_Y_TITLE' | translate
+                      }}<input
+                        maxlength="160"
+                        [value]="draft.yTitle"
+                        (input)="changeChart({ yTitle: $any($event.target).value })"
+                    /></label>
+                  }
+                  <label class="chart-check"
+                    ><input
+                      type="checkbox"
+                      [checked]="draft.legend"
+                      (change)="changeChart({ legend: $any($event.target).checked })"
+                    />{{ 'NOTE_EDITOR.CHART_LEGEND' | translate }}</label
+                  >
+                  <label class="chart-check"
+                    ><input
+                      type="checkbox"
+                      [checked]="draft.labels"
+                      (change)="changeChart({ labels: $any($event.target).checked })"
+                    />{{ 'NOTE_EDITOR.CHART_LABELS' | translate }}</label
+                  >
+                  @if (draft.type === 'column' || draft.type === 'bar' || draft.type === 'area') {
+                    <label class="chart-check"
+                      ><input
+                        type="checkbox"
+                        [checked]="draft.stacked"
+                        (change)="changeChart({ stacked: $any($event.target).checked })"
+                      />{{ 'NOTE_EDITOR.CHART_STACKED' | translate }}</label
+                    >
+                  }
+                  <label
+                    >{{ 'NOTE_EDITOR.CHART_WIDTH' | translate
+                    }}<input
+                      type="number"
+                      min="280"
+                      max="1600"
+                      [value]="draft.anchor.width"
+                      (change)="changeChartSize('width', +$any($event.target).value)"
+                  /></label>
+                  <label
+                    >{{ 'NOTE_EDITOR.CHART_HEIGHT' | translate
+                    }}<input
+                      type="number"
+                      min="200"
+                      max="1000"
+                      [value]="draft.anchor.height"
+                      (change)="changeChartSize('height', +$any($event.target).value)"
+                  /></label>
+                </fieldset>
+                <div class="xlsx-pivot-preview">
+                  <h3>{{ 'NOTE_EDITOR.PIVOT_PREVIEW' | translate }}</h3>
+                  <div class="chart-modal-preview">
+                    @if (chartPreview(); as data) {
+                      <app-spreadsheet-chart-view [definition]="draft" [data]="data" />
+                    } @else {
+                      <p>{{ 'NOTE_EDITOR.CHART_HELP' | translate }}</p>
+                    }
+                  </div>
+                  <p>{{ 'NOTE_EDITOR.CHART_NATIVE_HELP' | translate }}</p>
+                </div>
+              </div>
+              @if (chartError(); as error) {
+                <p class="xlsx-pivot-error" role="alert">{{ error | translate }}</p>
+              }
+              <footer>
+                <button [disabled]="chartBusy()" (click)="closeChart()">
+                  {{ 'NOTE_EDITOR.PIVOT_CANCEL' | translate }}</button
+                ><button
+                  class="chart-preview-button"
+                  [disabled]="chartBusy()"
+                  (click)="previewChart()"
+                >
+                  {{ 'NOTE_EDITOR.PIVOT_PREVIEW' | translate }}</button
+                ><button
+                  class="chart-save-button pivot-save-button"
+                  [disabled]="chartBusy()"
+                  (click)="saveChart()"
+                >
+                  {{
+                    (chartBusy() ? 'NOTE_EDITOR.PIVOT_WORKING' : 'NOTE_EDITOR.PIVOT_SAVE')
+                      | translate
+                  }}
+                </button>
+              </footer>
+            </section>
+          </div>
+        }
+      </div>
+    } @else {
+      <!-- Toolbar -->
+      <div
+        class="flex items-center gap-1 px-4 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex-shrink-0 flex-wrap"
+      >
+        <!-- Heading / Paragraph select -->
+        <select
+          class="h-7 px-2 text-xs rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+          (change)="
+            onFormatBlock($any($event.target).value);
+            $any($event.target).value = activeBlockFormat()
+          "
+          [value]="activeBlockFormat()"
+        >
+          <option value="p">{{ 'NOTE_EDITOR.PARAGRAPH' | translate }}</option>
+          <option value="h1">{{ 'NOTE_EDITOR.HEADING1' | translate }}</option>
+          <option value="h2">{{ 'NOTE_EDITOR.HEADING2' | translate }}</option>
+          <option value="h3">{{ 'NOTE_EDITOR.HEADING3' | translate }}</option>
+        </select>
+
+        <!-- Font size select -->
+        <select
+          class="h-7 px-2 text-xs rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+          (change)="onFontSize($any($event.target).value)"
+          [value]="activeFontSize()"
+        >
+          <option value="1">10px</option>
+          <option value="2">13px</option>
+          <option value="3">16px</option>
+          <option value="4">18px</option>
+          <option value="5">24px</option>
+          <option value="6">32px</option>
+          <option value="7">48px</option>
+        </select>
+
+        <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+        <!-- Text style buttons -->
+        <button
+          class="toolbar-btn"
+          [class.active]="isBold()"
+          [title]="'NOTE_EDITOR.BOLD' | translate"
+          (click)="execCommand('bold')"
+        >
+          <span class="material-symbols-outlined text-base">format_bold</span>
+        </button>
+        <button
+          class="toolbar-btn"
+          [class.active]="isItalic()"
+          [title]="'NOTE_EDITOR.ITALIC' | translate"
+          (click)="execCommand('italic')"
+        >
+          <span class="material-symbols-outlined text-base">format_italic</span>
+        </button>
+        <button
+          class="toolbar-btn"
+          [class.active]="isUnderline()"
+          [title]="'NOTE_EDITOR.UNDERLINE' | translate"
+          (click)="execCommand('underline')"
+        >
+          <span class="material-symbols-outlined text-base">format_underlined</span>
+        </button>
+        <button
+          class="toolbar-btn"
+          [class.active]="isStrike()"
+          [title]="'NOTE_EDITOR.STRIKETHROUGH' | translate"
+          (click)="execCommand('strikeThrough')"
+        >
+          <span class="material-symbols-outlined text-base">strikethrough_s</span>
+        </button>
+
+        <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+        <!-- Text color -->
+        <div class="relative toolbar-btn p-0">
+          <input
+            type="color"
+            class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+            [value]="activeTextColor()"
+            (input)="onTextColor($any($event.target).value)"
+            [title]="'NOTE_EDITOR.TEXT_COLOR' | translate"
+          />
+          <span class="material-symbols-outlined text-base pointer-events-none"
+            >format_color_text</span
+          >
+          <div
+            class="absolute bottom-0.5 left-1 right-1 h-0.5 rounded"
+            [style.background]="activeTextColor()"
+          ></div>
+        </div>
+
+        <!-- Highlight / background color -->
+        <div class="relative toolbar-btn p-0">
+          <input
+            type="color"
+            class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+            value="#ffff00"
+            (input)="onHighlightColor($any($event.target).value)"
+            [title]="'NOTE_EDITOR.HIGHLIGHT_COLOR' | translate"
+          />
+          <span class="material-symbols-outlined text-base pointer-events-none"
+            >format_color_fill</span
+          >
+        </div>
+
+        <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+        <!-- Alignment -->
+        <button
+          class="toolbar-btn"
+          [class.active]="activeAlign() === 'left'"
+          [title]="'NOTE_EDITOR.ALIGN_LEFT' | translate"
+          (click)="execCommand('justifyLeft')"
+        >
+          <span class="material-symbols-outlined text-base">format_align_left</span>
+        </button>
+        <button
+          class="toolbar-btn"
+          [class.active]="activeAlign() === 'center'"
+          [title]="'NOTE_EDITOR.ALIGN_CENTER' | translate"
+          (click)="execCommand('justifyCenter')"
+        >
+          <span class="material-symbols-outlined text-base">format_align_center</span>
+        </button>
+        <button
+          class="toolbar-btn"
+          [class.active]="activeAlign() === 'right'"
+          [title]="'NOTE_EDITOR.ALIGN_RIGHT' | translate"
+          (click)="execCommand('justifyRight')"
+        >
+          <span class="material-symbols-outlined text-base">format_align_right</span>
+        </button>
+        <button
+          class="toolbar-btn"
+          [class.active]="activeAlign() === 'justify'"
+          [title]="'NOTE_EDITOR.JUSTIFY' | translate"
+          (click)="execCommand('justifyFull')"
+        >
+          <span class="material-symbols-outlined text-base">format_align_justify</span>
+        </button>
+
+        <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+        <!-- Lists -->
+        <button
+          class="toolbar-btn"
+          [class.active]="isUnorderedList()"
+          [title]="'NOTE_EDITOR.BULLET_LIST' | translate"
+          (click)="execCommand('insertUnorderedList')"
+        >
+          <span class="material-symbols-outlined text-base">format_list_bulleted</span>
+        </button>
+        <button
+          class="toolbar-btn"
+          [class.active]="isOrderedList()"
+          [title]="'NOTE_EDITOR.NUMBERED_LIST' | translate"
+          (click)="execCommand('insertOrderedList')"
+        >
+          <span class="material-symbols-outlined text-base">format_list_numbered</span>
+        </button>
+
+        <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+        <!-- Indent -->
+        <button
+          class="toolbar-btn"
+          [title]="'NOTE_EDITOR.INDENT' | translate"
+          (click)="execCommand('indent')"
+        >
+          <span class="material-symbols-outlined text-base">format_indent_increase</span>
+        </button>
+        <button
+          class="toolbar-btn"
+          [title]="'NOTE_EDITOR.OUTDENT' | translate"
+          (click)="execCommand('outdent')"
+        >
+          <span class="material-symbols-outlined text-base">format_indent_decrease</span>
+        </button>
+
+        <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+        <!-- Clear formatting -->
+        <button
+          class="toolbar-btn"
+          [title]="'NOTE_EDITOR.CLEAR_FORMAT' | translate"
+          (click)="clearFormatting()"
+        >
+          <span class="material-symbols-outlined text-base">format_clear</span>
+        </button>
+
+        <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+        <!-- Insert image -->
+        <button
+          class="toolbar-btn"
+          [title]="'NOTE_EDITOR.INSERT_IMAGE' | translate"
+          (click)="insertImageFromFile()"
+        >
+          <span class="material-symbols-outlined text-base">image</span>
+        </button>
+
+        <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+        <!-- Word wrap toggle -->
+        <button
+          class="toolbar-btn"
+          [class.active]="wordWrap()"
+          [title]="
+            wordWrap()
+              ? ('NOTE_EDITOR.SCROLL_HORIZONTAL' | translate)
+              : ('NOTE_EDITOR.WORD_WRAP' | translate)
+          "
+          (click)="wordWrap.set(!wordWrap())"
+        >
+          <span class="material-symbols-outlined text-base">wrap_text</span>
+        </button>
+
+        <div class="w-px h-5 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
+        <!-- AI Chat toggle -->
+        <button
+          class="toolbar-btn"
+          [title]="'NOTE_EDITOR.AI_ASSISTANT' | translate"
+          (click)="aiChatToggle.emit()"
+        >
+          <span class="material-symbols-outlined text-base">smart_toy</span>
+        </button>
+
+        <button
+          class="toolbar-btn"
+          [disabled]="printing()"
+          [title]="'NOTE_EDITOR.PRINT_SHORTCUT' | translate"
+          (click)="printCurrentDocument()"
+        >
+          <span class="material-symbols-outlined text-base">print</span>
+        </button>
+
+        <!-- Spacer to push download to the right -->
+        <div class="flex-1"></div>
+
+        <!-- Download dropdown -->
+        <div class="relative" #downloadDropdown>
+          <button
+            class="toolbar-btn !w-auto px-2 gap-1"
+            [title]="'NOTE_EDITOR.DOWNLOAD_NOTE' | translate"
+            (click)="showDownloadMenu.set(!showDownloadMenu())"
+          >
+            <span class="material-symbols-outlined text-base">download</span>
+            <span class="material-symbols-outlined text-xs">expand_more</span>
+          </button>
+          @if (showDownloadMenu()) {
+            <div
+              class="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg py-1 min-w-[160px]"
+            >
+              <button
+                class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+                (click)="downloadAsTxt()"
+              >
+                <span class="material-symbols-outlined text-sm">description</span>
+                {{ 'NOTE_EDITOR.PLAIN_TEXT' | translate }}
+              </button>
+              <button
+                class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+                (click)="downloadAsHtml()"
+              >
+                <span class="material-symbols-outlined text-sm">code</span>
+                {{ 'NOTE_EDITOR.HTML_DOC' | translate }}
+              </button>
+              <button
+                class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+                (click)="downloadAsDocx()"
+              >
+                <span class="material-symbols-outlined text-sm">article</span>
+                {{ 'NOTE_EDITOR.WORD_DOC' | translate }}
+              </button>
+              <button
+                class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+                (click)="downloadAsPptx()"
+              >
+                <span class="material-symbols-outlined text-sm">slideshow</span>
+                {{ 'NOTE_EDITOR.POWERPOINT_DOC' | translate }}
+              </button>
+              <button
+                class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+                (click)="downloadAsPdf()"
+              >
+                <span class="material-symbols-outlined text-sm">picture_as_pdf</span>
+                {{ 'NOTE_EDITOR.PDF_DOC' | translate }}
+              </button>
+              <button
+                class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+                (click)="downloadAsXlsx()"
+              >
+                <span class="material-symbols-outlined text-sm">table_chart</span>
+                {{ 'NOTE_EDITOR.EXCEL_DOC' | translate }}
+              </button>
+              <div class="border-t border-slate-200 dark:border-slate-700 my-1"></div>
+              <button
+                class="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 transition-colors"
+                (click)="downloadAsJson()"
+              >
+                <span class="material-symbols-outlined text-sm">data_object</span>
+                {{ 'NOTE_EDITOR.JSON_DOC' | translate }}
+              </button>
             </div>
           }
-          <input
-            class="w-full text-4xl font-extrabold border-none bg-transparent p-0 focus:ring-0 focus:outline-none text-slate-900 dark:text-white placeholder-slate-300 dark:placeholder-slate-600"
-            type="text"
-            [placeholder]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate"
-            [value]="title()"
-            (input)="onTitleChange($any($event.target).value)"
-          />
-          <div class="flex items-center gap-4 mt-4 text-xs text-slate-400">
-            <span class="flex items-center gap-1.5">
-              <span class="material-symbols-outlined text-xs">calendar_today</span>
-              {{ lastEdited() }}
-            </span>
-          </div>
         </div>
-
-        <!-- Rich text editable area -->
-        <div
-          #editorEl
-          class="editor-content text-lg leading-relaxed text-slate-700 dark:text-slate-300 bg-transparent focus:outline-none"
-          [style.word-wrap]="wordWrap() ? 'break-word' : 'normal'"
-          [style.overflow-wrap]="wordWrap() ? 'break-word' : 'normal'"
-          [style.white-space]="wordWrap() ? 'normal' : 'nowrap'"
-          contenteditable="true"
-          (input)="onEditorInput()"
-          (paste)="onEditorPaste($event)"
-          (drop)="onEditorDrop($event)"
-          (dragover)="$event.preventDefault()"
-          (mouseup)="refreshToolbarState()"
-          (keyup)="refreshToolbarState()"
-          [attr.data-placeholder]="'NOTE_EDITOR.START_WRITING' | translate"
-        ></div>
       </div>
-    </div>
 
-    <!-- Footer Meta -->
-    <footer
-      class="h-10 border-t border-slate-200 dark:border-slate-800 px-6 flex items-center justify-between bg-slate-50 dark:bg-background-dark/50 flex-shrink-0"
-    >
-      <p class="text-[10px] text-slate-400 uppercase tracking-widest">
-        {{ 'NOTE_EDITOR.LAST_EDIT' | translate }}: {{ lastEdited() }}
-      </p>
-      <div class="flex items-center gap-4">
-        <span class="text-[10px] text-slate-400 uppercase tracking-widest"
-          >{{ wordCount() }} {{ 'NOTE_EDITOR.WORDS' | translate }}</span
-        >
-        <span class="text-[10px] text-slate-400 uppercase tracking-widest"
-          >{{ charCount() }} {{ 'NOTE_EDITOR.CHARACTERS' | translate }}</span
-        >
+      <!-- Editor Content Area -->
+      <div class="flex-1 overflow-y-auto overflow-x-auto custom-scrollbar">
+        <div class="px-6 py-8">
+          <div
+            class="mb-8"
+            [style.word-wrap]="wordWrap() ? 'break-word' : 'normal'"
+            [style.overflow-wrap]="wordWrap() ? 'break-word' : 'normal'"
+            [style.white-space]="wordWrap() ? 'normal' : 'nowrap'"
+          >
+            @if (folderName(); as fname) {
+              <div
+                class="flex items-center gap-2 text-xs font-medium text-primary uppercase tracking-widest mb-4"
+              >
+                <span class="material-symbols-outlined text-sm">folder</span>
+                {{ fname }}
+              </div>
+            }
+            <input
+              class="w-full text-4xl font-extrabold border-none bg-transparent p-0 focus:ring-0 focus:outline-none text-slate-900 dark:text-white placeholder-slate-300 dark:placeholder-slate-600"
+              type="text"
+              [placeholder]="'NOTE_EDITOR.TITLE_PLACEHOLDER' | translate"
+              [value]="title()"
+              (input)="onTitleChange($any($event.target).value)"
+            />
+            <div class="flex items-center gap-4 mt-4 text-xs text-slate-400">
+              <span class="flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-xs">calendar_today</span>
+                {{ lastEdited() }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Rich text editable area -->
+          <div
+            #editorEl
+            class="editor-content text-lg leading-relaxed text-slate-700 dark:text-slate-300 bg-transparent focus:outline-none"
+            [style.word-wrap]="wordWrap() ? 'break-word' : 'normal'"
+            [style.overflow-wrap]="wordWrap() ? 'break-word' : 'normal'"
+            [style.white-space]="wordWrap() ? 'normal' : 'nowrap'"
+            contenteditable="true"
+            (input)="onEditorInput()"
+            (paste)="onEditorPaste($event)"
+            (drop)="onEditorDrop($event)"
+            (dragover)="$event.preventDefault()"
+            (mouseup)="refreshToolbarState()"
+            (keyup)="refreshToolbarState()"
+            [attr.data-placeholder]="'NOTE_EDITOR.START_WRITING' | translate"
+          ></div>
+        </div>
       </div>
-    </footer>
+
+      <!-- Footer Meta -->
+      <footer
+        class="h-10 border-t border-slate-200 dark:border-slate-800 px-6 flex items-center justify-between bg-slate-50 dark:bg-background-dark/50 flex-shrink-0"
+      >
+        <p class="text-[10px] text-slate-400 uppercase tracking-widest">
+          {{ 'NOTE_EDITOR.LAST_EDIT' | translate }}: {{ lastEdited() }}
+        </p>
+        <div class="flex items-center gap-4">
+          <span class="text-[10px] text-slate-400 uppercase tracking-widest"
+            >{{ wordCount() }} {{ 'NOTE_EDITOR.WORDS' | translate }}</span
+          >
+          <span class="text-[10px] text-slate-400 uppercase tracking-widest"
+            >{{ charCount() }} {{ 'NOTE_EDITOR.CHARACTERS' | translate }}</span
+          >
+        </div>
+      </footer>
     }
   } @else {
     <!-- Empty state -->

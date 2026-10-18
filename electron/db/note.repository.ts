@@ -20,10 +20,14 @@ export function getNotesByFolder(folderId: number | null): NoteRow[] {
   const db = getDb();
   const cols = 'id, folder_id, title, content, file_type, created_at, updated_at';
   if (folderId === null) {
-    return db.prepare(`SELECT ${cols} FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC`).all() as NoteRow[];
+    return db
+      .prepare(`SELECT ${cols} FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC`)
+      .all() as NoteRow[];
   }
   return db
-    .prepare(`SELECT ${cols} FROM notes WHERE folder_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC`)
+    .prepare(
+      `SELECT ${cols} FROM notes WHERE folder_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC`,
+    )
     .all(folderId) as NoteRow[];
 }
 
@@ -42,7 +46,10 @@ export function createNote(folderId: number | null, title?: string): NoteRow {
 }
 
 /** Construye un UPDATE parcial sólo con los campos recibidos. */
-export function updateNote(id: number, data: { title?: string; content?: string; folder_id?: number | null }): NoteRow {
+export function updateNote(
+  id: number,
+  data: Partial<Pick<NoteRow, 'title' | 'content' | 'folder_id' | 'file_data' | 'file_type'>>,
+): NoteRow {
   const db = getDb();
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -59,13 +66,13 @@ export function updateNote(id: number, data: { title?: string; content?: string;
     fields.push('folder_id = ?');
     values.push(data.folder_id);
   }
-  if ((data as any).file_data !== undefined) {
+  if (data.file_data !== undefined) {
     fields.push('file_data = ?');
-    values.push((data as any).file_data);
+    values.push(data.file_data);
   }
-  if ((data as any).file_type !== undefined) {
+  if (data.file_type !== undefined) {
     fields.push('file_type = ?');
-    values.push((data as any).file_type);
+    values.push(data.file_type);
   }
 
   if (fields.length > 0) {

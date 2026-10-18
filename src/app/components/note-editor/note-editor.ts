@@ -1,4 +1,40 @@
 import {
+  recalculateSpreadsheetWorkbook,
+  SpreadsheetSpill,
+  spreadsheetSpillCells,
+} from '../../models/spreadsheet-workbook';
+import {
+  CellMapper,
+  remapSpreadsheetTable,
+  newTableColumn,
+  validateTableName,
+  tableTotalFormula,
+  TABLE_TOTAL_FUNCTIONS,
+} from '../../models/spreadsheet-table-operations';
+import { SpreadsheetTable } from '../../models/spreadsheet-table';
+import { resizeSpreadsheetTable, tableBounds } from '../../models/spreadsheet-table-resize';
+import { resolveSpreadsheetTable } from '../../models/spreadsheet-table';
+import { ADDITIONAL_FORMULA_SUGGESTIONS } from '../../models/spreadsheet-formula-catalog';
+import {
+  canonicalSpreadsheetFormula,
+  ooxmlSpreadsheetFormula,
+  evaluateSpreadsheetFormula,
+  spreadsheetAddress,
+  translateSpreadsheetFormula,
+  remapSpreadsheetFormula,
+  renameSpreadsheetTableReferences,
+  renameSpreadsheetColumnReferences,
+} from '../../models/spreadsheet-formula';
+import type { SpreadsheetFormat } from '../../models/spreadsheet-format';
+import type { PivotDefinition, SavedPivot, PivotAggregate } from '../../models/spreadsheet-pivot';
+import type {
+  ChartDefinition,
+  ChartData,
+  ChartType,
+  SavedChart,
+} from '../../models/spreadsheet-chart';
+import { SpreadsheetChartView, CHART_COLORS } from './spreadsheet-chart-view';
+import {
   Component,
   inject,
   signal,
@@ -20,6 +56,7 @@ import { DecimalPipe, NgClass, NgStyle } from '@angular/common';
 import { NoteService } from '../../services/note.service';
 import { DownloadService } from '../../services/download.service';
 import { PresentationExportService } from '../../services/presentation-export.service';
+import { ImportedDocument } from '../imported-document/imported-document';
 import {
   createPresentationSlide,
   parsePresentationDocument,
@@ -37,10 +74,18 @@ type XlsxSheetView = {
   name: string;
   data: XlsxCellValue[][];
   colCount: number;
-  formulas: { row: number; col: number; formula: string }[];
+  hiddenRows?: number[];
+  hasActiveFilters?: boolean;
+  formulas: { row: number; col: number; formula: string; arrayRange?: string; dynamic?: boolean }[];
+  tables?: import('../../models/spreadsheet-table').SpreadsheetTable[];
   merges?: { s: { r: number; c: number }; e: { r: number; c: number } }[];
   colWidths?: number[];
   rowHeights?: number[];
+  cellStyles?: Record<string, Record<string, string>>;
+  numberFormats?: Record<string, string>;
+  formattedCells?: Record<string, { value: XlsxCellValue; text: string }>;
+  date1904?: boolean;
+  definedNames?: Record<string, string>;
 };
 
 type FormulaSuggestion = { name: string; syntax: string; description: string };
@@ -58,7 +103,9 @@ export function evaluateArithmeticExpression(
   const skipWhitespace = (): void => {
     while (/\s/.test(expression[position] ?? '')) position++;
   };
-  const fail = (message = '#ERROR!'): never => { throw new Error(message); };
+  const fail = (message = '#ERROR!'): never => {
+    throw new Error(message);
+  };
   const parsePrimary = (): number => {
     skipWhitespace();
     if (expression[position] === '(') {
@@ -83,17 +130,29 @@ export function evaluateArithmeticExpression(
   };
   const parseUnary = (): number => {
     skipWhitespace();
-    if (expression[position] === '+') { position++; return parseUnary(); }
-    if (expression[position] === '-') { position++; return -parseUnary(); }
+    if (expression[position] === '+') {
+      position++;
+      return parseUnary();
+    }
+    if (expression[position] === '-') {
+      position++;
+      return -parseUnary();
+    }
     let value = parsePrimary();
     skipWhitespace();
-    if (expression[position] === '%') { position++; value /= 100; }
+    if (expression[position] === '%') {
+      position++;
+      value /= 100;
+    }
     return value;
   };
   const parsePower = (): number => {
     let value = parseUnary();
     skipWhitespace();
-    if (expression[position] === '^') { position++; value = Math.pow(value, parsePower()); }
+    if (expression[position] === '^') {
+      position++;
+      value = Math.pow(value, parsePower());
+    }
     return value;
   };
   const parseTerm = (): number => {
@@ -143,10 +202,14 @@ export function nextSpreadsheetCell(
   const lastRow = Math.max(0, rowCount - 1);
   const lastCol = Math.max(0, colCount - 1);
   switch (direction) {
-    case 'up': return { row: Math.max(0, cell.row - 1), col: cell.col };
-    case 'down': return { row: Math.min(lastRow, cell.row + 1), col: cell.col };
-    case 'left': return { row: cell.row, col: Math.max(0, cell.col - 1) };
-    case 'right': return { row: cell.row, col: Math.min(lastCol, cell.col + 1) };
+    case 'up':
+      return { row: Math.max(0, cell.row - 1), col: cell.col };
+    case 'down':
+      return { row: Math.min(lastRow, cell.row + 1), col: cell.col };
+    case 'left':
+      return { row: cell.row, col: Math.max(0, cell.col - 1) };
+    case 'right':
+      return { row: cell.row, col: Math.min(lastCol, cell.col + 1) };
   }
 }
 
@@ -154,7 +217,7 @@ export function nextSpreadsheetCell(
   selector: 'app-note-editor',
   templateUrl: './note-editor.html',
   styleUrl: './note-editor.scss',
-  imports: [TranslateModule, NgClass, NgStyle, DecimalPipe],
+  imports: [TranslateModule, NgClass, NgStyle, DecimalPipe, ImportedDocument, SpreadsheetChartView],
 })
 /**
  * Editor multimodal de Helper Notes.
@@ -190,7 +253,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   protected presentedSlideIndex = signal(0);
   protected presentationExporting = signal(false);
   protected printing = signal(false);
-  protected activePresentationRibbonTab = signal<'home' | 'insert' | 'design' | 'transitions' | 'animations' | 'slideshow'>('home');
+  protected activePresentationRibbonTab = signal<
+    'home' | 'insert' | 'design' | 'transitions' | 'animations' | 'slideshow'
+  >('home');
   protected activePresentationTextTarget = signal<'title' | 'body'>('title');
   protected activePresentationAnimationTarget = signal<'title' | 'body' | 'both'>('title');
   protected presentationEffectsPreviewing = signal(false);
@@ -200,17 +265,114 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     { name: 'Azul', backgroundColor: '#eff6ff', accentColor: '#1d4ed8', textColor: '#1e293b' },
     { name: 'Verde', backgroundColor: '#f0fdf4', accentColor: '#15803d', textColor: '#1f2937' },
     { name: 'Oscuro', backgroundColor: '#0f172a', accentColor: '#fb923c', textColor: '#e2e8f0' },
-    { name: 'Minimalista', backgroundColor: '#fafafa', accentColor: '#111827', textColor: '#374151' },
+    {
+      name: 'Minimalista',
+      backgroundColor: '#fafafa',
+      accentColor: '#111827',
+      textColor: '#374151',
+    },
   ];
-  protected readonly activePresentationSlide = computed(() =>
-    this.presentationSlides()[this.activePresentationSlideIndex()] ?? null,
+  protected readonly activePresentationSlide = computed(
+    () => this.presentationSlides()[this.activePresentationSlideIndex()] ?? null,
   );
-  protected readonly presentedSlide = computed(() =>
-    this.presentationSlides()[this.presentedSlideIndex()] ?? null,
+  protected readonly presentedSlide = computed(
+    () => this.presentationSlides()[this.presentedSlideIndex()] ?? null,
   );
 
   // Excel viewer state signals
   protected xlsxSheets = signal<XlsxSheetView[]>([]);
+  protected xlsxPivots = signal<SavedPivot[]>([]);
+  protected xlsxCharts = signal<SavedChart[]>([]);
+  protected selectedChart = signal<string | null>(null);
+  protected chartDraft = signal<ChartDefinition | null>(null);
+  protected tableDraft = signal<{
+    name: string;
+    ref: string;
+    source: string | null;
+    totals: boolean;
+    aggregates: Record<string, string>;
+  } | null>(null);
+  protected readonly tableTotalFunctions = TABLE_TOTAL_FUNCTIONS;
+  private pendingTableStructure = false;
+  protected tableError = signal<string | null>(null);
+  protected chartPreview = signal<ChartData | null>(null);
+  protected chartBusy = signal(false);
+  protected chartError = signal<string | null>(null);
+  protected readonly chartTypes: ChartType[] = [
+    'column',
+    'bar',
+    'line',
+    'area',
+    'pie',
+    'doughnut',
+    'scatter',
+  ];
+  protected readonly chartColors = CHART_COLORS;
+  private chartEpoch = 0;
+  private chartNoteId: number | null = null;
+  private chartDrag: {
+    chart: SavedChart;
+    noteId: number;
+    x: number;
+    y: number;
+    scrollX: number;
+    scrollY: number;
+    left: number;
+    top: number;
+    resize: boolean;
+  } | null = null;
+  protected readonly activeCharts = computed(() =>
+    this.xlsxCharts().filter((c) => c.hostSheet === this.activeSheet?.name),
+  );
+  protected readonly chartFields = computed(() => {
+    const draft = this.chartDraft();
+    if (!draft) return [];
+    const [a, b] = draft.sourceRange
+      .replace(/\$/g, '')
+      .toUpperCase()
+      .split(':')
+      .map(spreadsheetAddress);
+    if (!a || !b || b.col < a.col || b.col - a.col > 255) return [];
+    const sheet = this.xlsxSheets().find((s) => s.name === draft.sourceSheet);
+    return Array.from({ length: b.col - a.col + 1 }, (_, i) =>
+      draft.headers
+        ? String(sheet?.data[a.row]?.[a.col + i] ?? this.getColumnLabel(a.col + i))
+        : this.getColumnLabel(a.col + i),
+    );
+  });
+  protected pivotDraft = signal<PivotDefinition | null>(null);
+  protected pivotBusy = signal(false);
+  protected pivotError = signal<string | null>(null);
+  protected pivotPreview = signal<{
+    matrix: XlsxCellValue[][];
+    matched: number;
+    rows: number;
+    columns: number;
+  } | null>(null);
+  protected pivotWarnings = signal<string[]>([]);
+  private pivotEpoch = 0;
+  private pivotNoteId: number | null = null;
+  protected readonly pivotAggregates: PivotAggregate[] = [
+    'sum',
+    'count',
+    'countNums',
+    'average',
+    'min',
+    'max',
+  ];
+  protected readonly activePivot = computed(() =>
+    this.xlsxPivots().find((p) => p.targetSheet === this.activeSheet?.name),
+  );
+  protected readonly pivotHeaders = computed(() => {
+    const draft = this.pivotDraft();
+    if (!draft) return [];
+    const [a, b] = draft.sourceRange.replace(/\$/g, '').split(':').map(spreadsheetAddress);
+    if (!a || !b || b.col < a.col || b.col - a.col > 255) return [];
+    const sheet = this.xlsxSheets().find((s) => s.name === draft.sourceSheet);
+    return Array.from({ length: b.col - a.col + 1 }, (_, i) =>
+      String(sheet?.data[a.row]?.[a.col + i] ?? '').trim(),
+    );
+  });
   protected activeSheetIndex = signal(0);
   protected editingCell = signal<{ row: number; col: number } | null>(null);
   protected formulaBarValue = signal('');
@@ -220,19 +382,49 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   private xlsxBase64 = '';
   protected xlsxLoading = signal(false);
   private pendingFocusCellInput = false;
-  private xlsxResize: { type: 'column' | 'row'; index: number; start: number; initialSize: number } | null = null;
+  private xlsxResize: {
+    type: 'column' | 'row';
+    index: number;
+    start: number;
+    initialSize: number;
+  } | null = null;
 
   private readonly formulaCatalog: FormulaSuggestion[] = [
     { name: 'SUMA', syntax: 'SUMA(número1; número2; …)', description: 'Suma números o rangos.' },
-    { name: 'PROMEDIO', syntax: 'PROMEDIO(número1; número2; …)', description: 'Calcula el promedio.' },
-    { name: 'CONTAR', syntax: 'CONTAR(valor1; valor2; …)', description: 'Cuenta valores numéricos.' },
+    {
+      name: 'PROMEDIO',
+      syntax: 'PROMEDIO(número1; número2; …)',
+      description: 'Calcula el promedio.',
+    },
+    {
+      name: 'CONTAR',
+      syntax: 'CONTAR(valor1; valor2; …)',
+      description: 'Cuenta valores numéricos.',
+    },
     { name: 'MIN', syntax: 'MIN(número1; número2; …)', description: 'Devuelve el valor mínimo.' },
     { name: 'MAX', syntax: 'MAX(número1; número2; …)', description: 'Devuelve el valor máximo.' },
-    { name: 'SI', syntax: 'SI(condición; valor_si_verdadero; valor_si_falso)', description: 'Evalúa una condición.' },
-    { name: 'CONTAR.SI', syntax: 'CONTAR.SI(rango; criterio)', description: 'Cuenta celdas que cumplen un criterio.' },
-    { name: 'SUMAR.SI', syntax: 'SUMAR.SI(rango; criterio; rango_suma)', description: 'Suma celdas que cumplen un criterio.' },
-    { name: 'REDONDEAR', syntax: 'REDONDEAR(número; decimales)', description: 'Redondea un número.' },
+    {
+      name: 'SI',
+      syntax: 'SI(condición; valor_si_verdadero; valor_si_falso)',
+      description: 'Evalúa una condición.',
+    },
+    {
+      name: 'CONTAR.SI',
+      syntax: 'CONTAR.SI(rango; criterio)',
+      description: 'Cuenta celdas que cumplen un criterio.',
+    },
+    {
+      name: 'SUMAR.SI',
+      syntax: 'SUMAR.SI(rango; criterio; rango_suma)',
+      description: 'Suma celdas que cumplen un criterio.',
+    },
+    {
+      name: 'REDONDEAR',
+      syntax: 'REDONDEAR(número; decimales)',
+      description: 'Redondea un número.',
+    },
     { name: 'ABS', syntax: 'ABS(número)', description: 'Devuelve el valor absoluto.' },
+    ...ADDITIONAL_FORMULA_SUGGESTIONS,
   ];
 
   // Range selection state
@@ -243,7 +435,16 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   private xlsxIsDragging = false;
 
   // Clipboard
-  private xlsxClipboard: { data: (string | number | boolean | null)[][]; startRow: number; startCol: number; isCut: boolean } | null = null;
+  private xlsxClipboard: {
+    data: (string | number | boolean | null)[][];
+    startRow: number;
+    startCol: number;
+    isCut: boolean;
+    sheet: number;
+    text: string;
+    formulas: (string | null)[][];
+    formats: SpreadsheetFormat[][];
+  } | null = null;
   protected xlsxHasClipboard = signal(false);
 
   // Context menu
@@ -262,10 +463,20 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   protected xlsxAlign = signal<'left' | 'center' | 'right'>('left');
 
   // Cell formatting storage: key = "sheetIdx:row:col" => format object
-  private xlsxCellFormats = new Map<string, { bold?: boolean; italic?: boolean; underline?: boolean; align?: 'left' | 'center' | 'right'; fontSize?: number }>();
+  private xlsxCellFormats = new Map<string, SpreadsheetFormat>();
+  private xlsxOrigins: Record<string, string> | undefined;
+  protected xlsxError = signal<string | null>(null);
+  protected xlsxSaving = signal(false);
+  private xlsxSaveQueue: Promise<void> = Promise.resolve();
 
   // Formula storage: key = "sheetIdx:row:col" => formula string (e.g. "=SUM(A1:A10)")
   private xlsxCellFormulas = new Map<string, string>();
+  private xlsxSpills = new Map<string, SpreadsheetSpill>();
+  private xlsxCachedAnchors = new Set<string>();
+  private xlsxArrayFormulas = new Map<string, SpreadsheetSpill>();
+  private xlsxSpillOwners = new Map<string, string>();
+  private xlsxImportedFormulaCache = new Map<string, { formula: string; value: XlsxCellValue }>();
+  protected xlsxCachedFormulaCount = signal(0);
 
   // Formula range-selection mode: when typing a formula and user clicks cells to select ranges
   private xlsxFormulaRangeMode = false;
@@ -278,9 +489,16 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
   // Formula range highlights: colored rectangles showing referenced ranges during editing
   private readonly FORMULA_HIGHLIGHT_COLORS = [
-    '#4285f4', '#ea4335', '#9c27b0', '#ff9800', '#0097a7', '#43a047'
+    '#4285f4',
+    '#ea4335',
+    '#9c27b0',
+    '#ff9800',
+    '#0097a7',
+    '#43a047',
   ];
-  protected xlsxFormulaHighlights = signal<{ startRow: number; startCol: number; endRow: number; endCol: number; color: string }[]>([]);
+  protected xlsxFormulaHighlights = signal<
+    { startRow: number; startCol: number; endRow: number; endCol: number; color: string }[]
+  >([]);
 
   // Minimum visible rows/cols to fill viewport like Excel
   private readonly MIN_VISIBLE_ROWS = 50;
@@ -301,6 +519,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   protected wordWrap = signal(false);
 
   private editorRef = viewChild<ElementRef<HTMLDivElement>>('editorEl');
+  private importedDocument = viewChild(ImportedDocument);
   private downloadDropdownRef = viewChild<ElementRef<HTMLDivElement>>('downloadDropdown');
   private xlsxGridRef = viewChild<ElementRef<HTMLDivElement>>('xlsxGrid');
   private cellInputRefs = viewChildren<ElementRef<HTMLInputElement>>('cellInput');
@@ -309,6 +528,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     noteId: number;
     title: string;
     content: string;
+    wordDocument: boolean;
   } | null = null;
   private skipNextSync = false;
 
@@ -334,7 +554,10 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       this.presentationMode.set(false);
 
       if (note) {
-        this.title.set(note.title);
+        // El autosave del DOCX puede actualizar metadatos mientras el usuario aún escribe su título.
+        this.title.set(
+          note.file_type === 'docx' && pending?.noteId === note.id ? pending.title : note.title,
+        );
         this.content.set(note.content);
 
         if (note.file_type === 'pdf') {
@@ -413,7 +636,10 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     this.downloadService.showSaving(fileName);
     try {
       const fullNote = await window.electronAPI.notesGetById(note.id);
-      if (!fullNote?.file_data) { this.downloadService.showError(fileName); return; }
+      if (!fullNote?.file_data) {
+        this.downloadService.showError(fileName);
+        return;
+      }
       const binaryStr = atob(fullNote.file_data);
       const buffer = Array.from(binaryStr, (c) => c.charCodeAt(0));
       const result = await window.electronAPI.fileSaveAsBuffer({
@@ -426,7 +652,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       } else {
         this.downloadService.dismiss(fileName);
       }
-    } catch { this.downloadService.showError(fileName); }
+    } catch {
+      this.downloadService.showError(fileName);
+    }
   }
 
   // ── Presentation editor ──
@@ -473,25 +701,35 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
   protected setPresentationLayout(layout: PresentationLayout): void {
     const index = this.activePresentationSlideIndex();
-    this.presentationSlides.set(this.presentationSlides().map((slide, slideIndex) =>
-      slideIndex === index ? { ...slide, layout } : slide,
-    ));
+    this.presentationSlides.set(
+      this.presentationSlides().map((slide, slideIndex) =>
+        slideIndex === index ? { ...slide, layout } : slide,
+      ),
+    );
     this.savePresentationContent();
   }
 
-  protected applyPresentationTheme(theme: { backgroundColor: string; accentColor: string; textColor: string }): void {
-    this.presentationSlides.set(this.presentationSlides().map(slide => ({
-      ...slide,
-      style: { ...slide.style, ...theme },
-    })));
+  protected applyPresentationTheme(theme: {
+    backgroundColor: string;
+    accentColor: string;
+    textColor: string;
+  }): void {
+    this.presentationSlides.set(
+      this.presentationSlides().map((slide) => ({
+        ...slide,
+        style: { ...slide.style, ...theme },
+      })),
+    );
     this.savePresentationContent();
   }
 
   protected setPresentationTransition(type: PresentationTransitionType): void {
     const index = this.activePresentationSlideIndex();
-    this.presentationSlides.set(this.presentationSlides().map((slide, slideIndex) =>
-      slideIndex === index ? { ...slide, transition: { ...slide.transition, type } } : slide,
-    ));
+    this.presentationSlides.set(
+      this.presentationSlides().map((slide, slideIndex) =>
+        slideIndex === index ? { ...slide, transition: { ...slide.transition, type } } : slide,
+      ),
+    );
     this.savePresentationContent();
     this.previewPresentationEffects();
   }
@@ -499,42 +737,60 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   protected setPresentationTransitionDuration(duration: number): void {
     const index = this.activePresentationSlideIndex();
     const safeDuration = Math.max(0.1, Math.min(5, duration || 0.45));
-    this.presentationSlides.set(this.presentationSlides().map((slide, slideIndex) =>
-      slideIndex === index ? { ...slide, transition: { ...slide.transition, duration: safeDuration } } : slide,
-    ));
+    this.presentationSlides.set(
+      this.presentationSlides().map((slide, slideIndex) =>
+        slideIndex === index
+          ? { ...slide, transition: { ...slide.transition, duration: safeDuration } }
+          : slide,
+      ),
+    );
     this.savePresentationContent();
   }
 
   protected applyPresentationTransitionToAll(): void {
     const transition = this.activePresentationSlide()?.transition;
     if (!transition) return;
-    this.presentationSlides.set(this.presentationSlides().map(slide => ({
-      ...slide,
-      transition: { ...transition },
-    })));
+    this.presentationSlides.set(
+      this.presentationSlides().map((slide) => ({
+        ...slide,
+        transition: { ...transition },
+      })),
+    );
     this.savePresentationContent();
   }
 
   protected setPresentationAnimation(type: PresentationAnimationType): void {
     const index = this.activePresentationSlideIndex();
     const target = this.activePresentationAnimationTarget();
-    this.presentationSlides.set(this.presentationSlides().map((slide, slideIndex) => {
-      if (slideIndex !== index) return slide;
-      return {
-        ...slide,
-        animations: {
-          title: target === 'title' || target === 'both' ? { ...slide.animations.title, type } : slide.animations.title,
-          body: target === 'body' || target === 'both' ? { ...slide.animations.body, type } : slide.animations.body,
-        },
-      };
-    }));
+    this.presentationSlides.set(
+      this.presentationSlides().map((slide, slideIndex) => {
+        if (slideIndex !== index) return slide;
+        return {
+          ...slide,
+          animations: {
+            title:
+              target === 'title' || target === 'both'
+                ? { ...slide.animations.title, type }
+                : slide.animations.title,
+            body:
+              target === 'body' || target === 'both'
+                ? { ...slide.animations.body, type }
+                : slide.animations.body,
+          },
+        };
+      }),
+    );
     this.savePresentationContent();
     this.previewPresentationEffects();
   }
 
-  protected isPresentationAnimationSelected(slide: PresentationSlide, type: PresentationAnimationType): boolean {
+  protected isPresentationAnimationSelected(
+    slide: PresentationSlide,
+    type: PresentationAnimationType,
+  ): boolean {
     const target = this.activePresentationAnimationTarget();
-    if (target === 'both') return slide.animations.title.type === type && slide.animations.body.type === type;
+    if (target === 'both')
+      return slide.animations.title.type === type && slide.animations.body.type === type;
     return slide.animations[target].type === type;
   }
 
@@ -545,17 +801,28 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     const max = field === 'duration' ? 5 : 10;
     const fallback = field === 'duration' ? 0.6 : 0;
     const safeValue = Math.max(min, Math.min(max, Number(value) || fallback));
-    const update = (animation: PresentationElementAnimation): PresentationElementAnimation => ({ ...animation, [field]: safeValue });
-    this.presentationSlides.set(this.presentationSlides().map((slide, slideIndex) => {
-      if (slideIndex !== index) return slide;
-      return {
-        ...slide,
-        animations: {
-          title: target === 'title' || target === 'both' ? update(slide.animations.title) : slide.animations.title,
-          body: target === 'body' || target === 'both' ? update(slide.animations.body) : slide.animations.body,
-        },
-      };
-    }));
+    const update = (animation: PresentationElementAnimation): PresentationElementAnimation => ({
+      ...animation,
+      [field]: safeValue,
+    });
+    this.presentationSlides.set(
+      this.presentationSlides().map((slide, slideIndex) => {
+        if (slideIndex !== index) return slide;
+        return {
+          ...slide,
+          animations: {
+            title:
+              target === 'title' || target === 'both'
+                ? update(slide.animations.title)
+                : slide.animations.title,
+            body:
+              target === 'body' || target === 'both'
+                ? update(slide.animations.body)
+                : slide.animations.body,
+          },
+        };
+      }),
+    );
     this.savePresentationContent();
   }
 
@@ -569,15 +836,25 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       (slide?.animations.title.delay ?? 0) + (slide?.animations.title.duration ?? 0),
       (slide?.animations.body.delay ?? 0) + (slide?.animations.body.duration ?? 0),
     );
-    this.presentationPreviewTimer = setTimeout(() => this.presentationEffectsPreviewing.set(false), (totalSeconds + 0.25) * 1000);
+    this.presentationPreviewTimer = setTimeout(
+      () => this.presentationEffectsPreviewing.set(false),
+      (totalSeconds + 0.25) * 1000,
+    );
   }
 
   protected presentationTransitionClass(slide: PresentationSlide, preview = false): string {
-    return preview && !this.presentationEffectsPreviewing() ? '' : `ppt-transition-${slide.transition.type}`;
+    return preview && !this.presentationEffectsPreviewing()
+      ? ''
+      : `ppt-transition-${slide.transition.type}`;
   }
 
-  protected presentationAnimationClass(animation: PresentationElementAnimation, preview = false): string {
-    return preview && !this.presentationEffectsPreviewing() ? '' : `ppt-animation-${animation.type}`;
+  protected presentationAnimationClass(
+    animation: PresentationElementAnimation,
+    preview = false,
+  ): string {
+    return preview && !this.presentationEffectsPreviewing()
+      ? ''
+      : `ppt-animation-${animation.type}`;
   }
 
   protected presentationEffectTiming(duration: number, delay = 0): Record<string, string> {
@@ -588,7 +865,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     const slide = this.activePresentationSlide();
     if (!slide) return;
     const key = `${this.activePresentationTextTarget()}${property}` as keyof PresentationSlideStyle;
-    this.updatePresentationSlideStyle({ [key]: !slide.style[key] } as Partial<PresentationSlideStyle>);
+    this.updatePresentationSlideStyle({
+      [key]: !slide.style[key],
+    } as Partial<PresentationSlideStyle>);
   }
 
   protected setPresentationTextAlign(align: 'left' | 'center' | 'right'): void {
@@ -605,7 +884,10 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     const slide = this.activePresentationSlide();
     if (!slide) return;
     const body = slide.body.trim()
-      ? slide.body.split('\n').map(line => line.startsWith('• ') ? line : `• ${line}`).join('\n')
+      ? slide.body
+          .split('\n')
+          .map((line) => (line.startsWith('• ') ? line : `• ${line}`))
+          .join('\n')
       : '• ';
     this.activePresentationTextTarget.set('body');
     this.updatePresentationSlide('body', body);
@@ -664,7 +946,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       this.activePresentationSlideIndex.set(0);
     } else {
       slides.splice(this.activePresentationSlideIndex(), 1);
-      this.activePresentationSlideIndex.set(Math.min(this.activePresentationSlideIndex(), slides.length - 1));
+      this.activePresentationSlideIndex.set(
+        Math.min(this.activePresentationSlideIndex(), slides.length - 1),
+      );
     }
     this.presentationSlides.set(slides);
     this.savePresentationContent();
@@ -694,7 +978,10 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   }
 
   protected changePresentedSlide(direction: -1 | 1): void {
-    const next = Math.max(0, Math.min(this.presentationSlides().length - 1, this.presentedSlideIndex() + direction));
+    const next = Math.max(
+      0,
+      Math.min(this.presentationSlides().length - 1, this.presentedSlideIndex() + direction),
+    );
     this.presentedSlideIndex.set(next);
   }
 
@@ -730,13 +1017,19 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     this.presentationExporting.set(true);
     this.downloadService.showSaving(fileName);
     try {
-      const bytes = await this.presentationExport.generateSlides(this.title(), this.presentationSlides());
+      const bytes = await this.presentationExport.generateSlides(
+        this.title(),
+        this.presentationSlides(),
+      );
       const result = await window.electronAPI.fileSaveAsBuffer({
         defaultName: fileName,
-        filters: [{ name: this.translate.instant('NOTE_EDITOR.FILTER_POWERPOINT'), extensions: ['pptx'] }],
+        filters: [
+          { name: this.translate.instant('NOTE_EDITOR.FILTER_POWERPOINT'), extensions: ['pptx'] },
+        ],
         buffer: Array.from(bytes),
       });
-      if (result.success && result.filePath) this.downloadService.showDone(fileName, result.filePath);
+      if (result.success && result.filePath)
+        this.downloadService.showDone(fileName, result.filePath);
       else this.downloadService.dismiss(fileName);
     } catch {
       this.downloadService.showError(fileName);
@@ -747,9 +1040,688 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
   // ── Excel (xlsx) viewer methods ──
 
+  /** Abre un gráfico existente o uno nuevo; recibe ID opcional y retorna después de guardar una celda pendiente. */
+  protected async openChart(id?: string): Promise<void> {
+    if (this.xlsxSaving()) return;
+    const noteId = this.noteService.selectedNoteId();
+    if (this.editingCell()) await this.commitCellEdit();
+    await this.xlsxSaveQueue;
+    if (noteId === null || noteId !== this.noteService.selectedNoteId() || !this.activeSheet)
+      return;
+    this.chartNoteId = noteId;
+    this.chartError.set(null);
+    this.chartPreview.set(null);
+    this.chartEpoch++;
+    const existing = id ? this.xlsxCharts().find((c) => c.id === id) : undefined;
+    if (existing) {
+      this.chartDraft.set(structuredClone(existing));
+      this.chartPreview.set(existing.error ? null : existing.data);
+    } else {
+      const sheet = this.activeSheet,
+        r = this.xlsxRange,
+        use = r && r.endRow > r.startRow;
+      const sr = use ? r.startRow : 0,
+        sc = use ? r.startCol : 0,
+        er = use ? r.endRow : Math.max(1, sheet.data.length - 1),
+        ec = use ? r.endCol : Math.max(1, sheet.colCount - 1);
+      this.chartDraft.set({
+        hostSheet: sheet.name,
+        sourceSheet: sheet.name,
+        sourceRange: `${this.getColumnLabel(sc)}${sr + 1}:${this.getColumnLabel(ec)}${er + 1}`,
+        title: this.title() || 'Gráfico',
+        type: 'column',
+        headers: true,
+        category: 0,
+        series: Array.from({ length: Math.min(4, ec - sc) }, (_, i) => i + 1),
+        legend: true,
+        labels: false,
+        stacked: false,
+        xTitle: '',
+        yTitle: '',
+        colors: [...CHART_COLORS],
+        anchor: {
+          row: 1,
+          col: Math.min(ec + 2, 12),
+          offsetX: 0,
+          offsetY: 0,
+          width: 600,
+          height: 360,
+        },
+      });
+    }
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLInputElement>('.chart-title-input')?.focus(),
+    );
+  }
+
+  /** Cierra el configurador e invalida respuestas antiguas; no recibe argumentos ni modifica el archivo. */
+  protected closeChart(): void {
+    this.chartEpoch++;
+    this.chartDraft.set(null);
+    this.chartPreview.set(null);
+    this.chartError.set(null);
+  }
+
+  /** Recibe propiedades del borrador; conserva sólo una serie en gráficos circulares y descarta la vista previa anterior. */
+  protected changeChart(change: Partial<ChartDefinition>): void {
+    const draft = this.chartDraft();
+    if (!draft) return;
+    const next = { ...draft, ...change };
+    if (next.type === 'pie' || next.type === 'doughnut') next.series = next.series.slice(0, 1);
+    if (!['column', 'bar', 'area'].includes(next.type)) next.stacked = false;
+    this.chartEpoch++;
+    this.chartDraft.set(next);
+    this.chartPreview.set(null);
+    this.chartError.set(null);
+  }
+
+  /** Cambia la hoja de origen; recibe nombre y reinicia el rango y sus columnas sin mover el gráfico. */
+  protected changeChartSource(name: string): void {
+    const sheet = this.xlsxSheets().find((s) => s.name === name);
+    if (!sheet) return;
+    this.changeChart({
+      sourceSheet: name,
+      sourceRange: `A1:${this.getColumnLabel(Math.max(1, sheet.colCount - 1))}${Math.max(2, sheet.data.length)}`,
+      category: 0,
+      series: [1],
+    });
+  }
+
+  /** Recibe categoría relativa; retira esa columna de las series y actualiza el borrador sin guardarlo. */
+  protected changeChartCategory(category: number): void {
+    const draft = this.chartDraft();
+    if (draft) this.changeChart({ category, series: draft.series.filter((i) => i !== category) });
+  }
+
+  /** Recibe dimensión y píxeles; limita el tamaño editable y actualiza el borrador sin guardar. */
+  protected changeChartSize(key: 'width' | 'height', value: number): void {
+    const draft = this.chartDraft();
+    if (draft && Number.isFinite(value))
+      this.changeChart({
+        anchor: {
+          ...draft.anchor,
+          [key]: Math.round(
+            Math.max(key === 'width' ? 280 : 200, Math.min(key === 'width' ? 1600 : 1000, value)),
+          ),
+        },
+      });
+  }
+
+  /** Agrega o quita una columna numérica; recibe su índice relativo y conserva el orden de las series. */
+  protected toggleChartSeries(field: number): void {
+    const draft = this.chartDraft();
+    if (!draft || field === draft.category) return;
+    const single = draft.type === 'pie' || draft.type === 'doughnut';
+    this.changeChart({
+      series: draft.series.includes(field)
+        ? draft.series.filter((i) => i !== field)
+        : single
+          ? [field]
+          : [...draft.series, field],
+    });
+  }
+
+  /** Recibe índice y color hexadecimal; actualiza la paleta sin introducir estilos arbitrarios. */
+  protected changeChartColor(index: number, color: string): void {
+    const draft = this.chartDraft();
+    if (!draft || !/^#[\da-f]{6}$/i.test(color)) return;
+    const colors = [...draft.colors];
+    colors[index] = color;
+    this.changeChart({ colors });
+  }
+
+  /** Recibe un código de error; retorna una clave de traducción conocida para el configurador o el objeto. */
+  protected chartErrorKey(error: unknown): string {
+    const code = error instanceof Error ? error.message : String(error ?? '');
+    return `NOTE_EDITOR.${['CHART_RANGE', 'CHART_FIELDS', 'CHART_SOURCE', 'CHART_POSITION', 'CHART_NUMBERS', 'CHART_SCATTER', 'CHART_PIE_SERIES', 'CHART_PIE_VALUES', 'CHART_LIMIT', 'CHART_NOT_FOUND'].includes(code) ? code : 'CHART_SAVE_ERROR'}`;
+  }
+
+  /** Calcula la vista previa desde el libro actual; no recibe argumentos ni guarda el borrador. */
+  protected async previewChart(): Promise<void> {
+    const draft = this.chartDraft();
+    if (!draft || this.chartBusy()) return;
+    const epoch = this.chartEpoch;
+    this.chartBusy.set(true);
+    this.chartError.set(null);
+    try {
+      const result = await window.electronAPI.xlsxChart(
+        this.xlsxBase64,
+        'preview',
+        structuredClone(draft),
+      );
+      if (epoch !== this.chartEpoch) return;
+      if (!result.success || !result.data) throw Error(result.error ?? 'CHART_SOURCE');
+      this.chartPreview.set(result.data);
+    } catch (error) {
+      if (epoch === this.chartEpoch) this.chartError.set(this.chartErrorKey(error));
+    } finally {
+      this.chartBusy.set(false);
+    }
+  }
+
+  /** Persiste el gráfico nativo y selecciona su objeto; no recibe argumentos y rechaza cambios si se cambió de nota. */
+  protected async saveChart(): Promise<void> {
+    const draft = this.chartDraft(),
+      noteId = this.chartNoteId;
+    if (!draft || noteId === null || this.chartBusy()) return;
+    if (noteId !== this.noteService.selectedNoteId()) {
+      this.closeChart();
+      return;
+    }
+    this.chartBusy.set(true);
+    this.xlsxSaving.set(true);
+    this.chartError.set(null);
+    const operation = this.xlsxSaveQueue.then(async () => {
+      this.pushUndoSnapshot();
+      const result = await window.electronAPI.xlsxChart(
+        this.xlsxBase64,
+        'save',
+        structuredClone(draft),
+      );
+      if (!result.success || !result.base64 || !result.chart)
+        throw Error(result.error ?? 'CHART_SOURCE');
+      await this.applyXlsxWorkbook(result.base64, noteId, draft.hostSheet);
+      this.selectedChart.set(result.chart.id);
+    });
+    this.xlsxSaveQueue = operation.catch(() => {});
+    try {
+      await operation;
+      this.closeChart();
+      requestAnimationFrame(() => {
+        const grid = this.xlsxGridRef()?.nativeElement,
+          chart = this.xlsxCharts().find((c) => c.id === this.selectedChart());
+        if (grid && chart) {
+          const position = this.chartPosition(chart);
+          grid.scrollTo({
+            left: Math.max(0, position.left - 40),
+            top: Math.max(0, position.top - 40),
+            behavior: 'smooth',
+          });
+        }
+      });
+    } catch (error) {
+      this.chartError.set(this.chartErrorKey(error));
+    } finally {
+      this.chartBusy.set(false);
+      this.xlsxSaving.set(false);
+    }
+  }
+
+  /** Quita el objeto elegido tras la confirmación del usuario; recibe ID y conserva celdas y dibujos restantes. */
+  protected async deleteChart(id: string): Promise<void> {
+    const noteId = this.noteService.selectedNoteId(),
+      chart = this.xlsxCharts().find((c) => c.id === id);
+    if (noteId === null || !chart || this.xlsxSaving()) return;
+    const accepted = await window.electronAPI.dialogConfirm({
+      title: this.translate.instant('NOTE_EDITOR.CHART_DELETE'),
+      message: this.translate.instant('NOTE_EDITOR.CHART_DELETE_CONFIRM'),
+    });
+    if (!accepted || this.noteService.selectedNoteId() !== noteId) return;
+    this.xlsxSaving.set(true);
+    const operation = this.xlsxSaveQueue.then(async () => {
+      this.pushUndoSnapshot();
+      const result = await window.electronAPI.xlsxChart(this.xlsxBase64, 'delete', undefined, id);
+      if (!result.success || !result.base64) throw Error(result.error ?? 'CHART_NOT_FOUND');
+      await this.applyXlsxWorkbook(result.base64, noteId, chart.hostSheet);
+      this.selectedChart.set(null);
+    });
+    this.xlsxSaveQueue = operation.catch(() => {});
+    try {
+      await operation;
+      this.closeChart();
+    } catch {
+      this.xlsxError.set('NOTE_EDITOR.CHART_SAVE_ERROR');
+    } finally {
+      this.xlsxSaving.set(false);
+    }
+  }
+
+  /** Recibe un gráfico de la hoja activa; retorna su posición CSS a partir del anclaje de celdas del XLSX. */
+  protected chartPosition(chart: ChartDefinition): { left: number; top: number } {
+    let left = 40 + chart.anchor.offsetX,
+      top = 24 + chart.anchor.offsetY;
+    for (let c = 0; c < chart.anchor.col; c++) left += this.getColumnWidth(c);
+    for (let r = 0; r < chart.anchor.row; r++) top += this.getRowHeight(r);
+    return { left, top };
+  }
+
+  /** Convierte píxeles del lienzo a un anclaje nativo; recibe posición sin encabezados y tamaño original y retorna coordenadas base cero. */
+  private chartAnchor(
+    left: number,
+    top: number,
+    anchor: ChartDefinition['anchor'],
+  ): ChartDefinition['anchor'] {
+    let col = 0,
+      row = 0;
+    left = Math.max(0, left);
+    top = Math.max(0, top);
+    while (col < 16383 && left >= this.getColumnWidth(col)) left -= this.getColumnWidth(col++);
+    while (row < 1048575 && top >= this.getRowHeight(row)) top -= this.getRowHeight(row++);
+    return { ...anchor, col, row, offsetX: left, offsetY: top };
+  }
+
+  /** Comienza mover o redimensionar; recibe evento, gráfico y modo y conserva una copia para revertir fallos. */
+  protected startChartDrag(event: MouseEvent, chart: SavedChart, resize = false): void {
+    if (event.button !== 0 || this.xlsxSaving()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const noteId = this.noteService.selectedNoteId(),
+      grid = this.xlsxGridRef()?.nativeElement;
+    if (noteId === null || !grid) return;
+    const position = this.chartPosition(chart);
+    this.selectedChart.set(chart.id);
+    this.chartDrag = {
+      chart: structuredClone(chart),
+      noteId,
+      x: event.clientX,
+      y: event.clientY,
+      scrollX: grid.scrollLeft,
+      scrollY: grid.scrollTop,
+      left: position.left - 40,
+      top: position.top - 24,
+      resize,
+    };
+  }
+
+  /** Recibe el movimiento global del ratón; actualiza en memoria el anclaje del gráfico durante el arrastre. */
+  protected onChartDrag(event: MouseEvent): void {
+    const drag = this.chartDrag,
+      grid = this.xlsxGridRef()?.nativeElement;
+    if (!drag || !grid || drag.noteId !== this.noteService.selectedNoteId()) return;
+    event.preventDefault();
+    const dx = event.clientX - drag.x + grid.scrollLeft - drag.scrollX,
+      dy = event.clientY - drag.y + grid.scrollTop - drag.scrollY;
+    const anchor = drag.resize
+      ? {
+          ...drag.chart.anchor,
+          width: Math.max(280, Math.min(1600, drag.chart.anchor.width + dx)),
+          height: Math.max(200, Math.min(1000, drag.chart.anchor.height + dy)),
+        }
+      : this.chartAnchor(drag.left + dx, drag.top + dy, drag.chart.anchor);
+    this.xlsxCharts.update((charts) =>
+      charts.map((c) => (c.id === drag.chart.id ? { ...c, anchor } : c)),
+    );
+  }
+
+  /** Finaliza el arrastre global; no recibe argumentos y guarda el nuevo anclaje mediante la cola del libro. */
+  protected async finishChartDrag(): Promise<void> {
+    const drag = this.chartDrag;
+    this.chartDrag = null;
+    if (!drag || drag.noteId !== this.noteService.selectedNoteId()) return;
+    const chart = this.xlsxCharts().find((c) => c.id === drag.chart.id);
+    if (!chart || JSON.stringify(chart.anchor) === JSON.stringify(drag.chart.anchor)) return;
+    this.xlsxSaving.set(true);
+    const operation = this.xlsxSaveQueue.then(async () => {
+      this.pushUndoSnapshot();
+      const result = await window.electronAPI.xlsxChart(this.xlsxBase64, 'save', chart);
+      if (!result.success || !result.base64) throw Error(result.error ?? 'CHART_POSITION');
+      await this.applyXlsxWorkbook(result.base64, drag.noteId, chart.hostSheet);
+    });
+    this.xlsxSaveQueue = operation.catch(() => {});
+    try {
+      await operation;
+    } catch {
+      this.xlsxCharts.update((charts) =>
+        charts.map((c) => (c.id === drag.chart.id ? drag.chart : c)),
+      );
+      this.xlsxError.set('NOTE_EDITOR.CHART_SAVE_ERROR');
+    } finally {
+      this.xlsxSaving.set(false);
+    }
+  }
+
+  /** Mantiene la navegación de teclado dentro del configurador; recibe evento y cierra con Escape cuando no hay guardado pendiente. */
+  protected onChartKeydown(event: KeyboardEvent): void {
+    event.stopPropagation();
+    if (event.key === 'Escape' && !this.chartBusy()) {
+      event.preventDefault();
+      this.closeChart();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const controls = Array.from(
+        (event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
+          'button:not(:disabled),input:not(:disabled),select:not(:disabled)',
+        ),
+      ).filter((c) => c.getClientRects().length > 0),
+      first = controls[0],
+      last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
+
+  /** Abre el configurador; recibe si debe forzar una tabla nueva y retorna tras guardar una edición de celda pendiente. */
+  protected async openPivot(createNew = false): Promise<void> {
+    const noteId = this.noteService.selectedNoteId();
+    if (this.editingCell()) await this.commitCellEdit();
+    await this.xlsxSaveQueue;
+    if (noteId === null || noteId !== this.noteService.selectedNoteId() || !this.activeSheet)
+      return;
+    this.pivotNoteId = noteId;
+    this.pivotError.set(null);
+    this.pivotPreview.set(null);
+    this.pivotEpoch++;
+    const existing = !createNew ? this.activePivot() : undefined;
+    if (existing) {
+      this.pivotDraft.set(structuredClone(existing));
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>('.pivot-name')?.focus());
+      return;
+    }
+    const source = this.xlsxPivots().some((p) => p.targetSheet === this.activeSheet!.name)
+      ? this.xlsxSheets().find((s) => !this.xlsxPivots().some((p) => p.targetSheet === s.name))
+      : this.activeSheet;
+    if (!source) return;
+    const range = this.xlsxRange;
+    const useSelection = source === this.activeSheet && range && range.endRow > range.startRow;
+    const startRow = useSelection ? range.startRow : 0,
+      startCol = useSelection ? range.startCol : 0;
+    const endRow = useSelection ? range.endRow : Math.max(1, source.data.length - 1);
+    const endCol = useSelection ? range.endCol : Math.max(0, source.colCount - 1);
+    let number = 1;
+    while (this.xlsxSheets().some((s) => s.name === `Tabla dinámica ${number}`)) number++;
+    this.pivotDraft.set({
+      name: `Tabla dinámica ${number}`,
+      sourceSheet: source.name,
+      sourceRange: `${this.getColumnLabel(startCol)}${startRow + 1}:${this.getColumnLabel(endCol)}${endRow + 1}`,
+      rows: [0],
+      columns: [],
+      values: [{ field: endCol - startCol, aggregate: 'sum' }],
+      filters: [],
+      totals: true,
+    });
+    requestAnimationFrame(() => document.querySelector<HTMLInputElement>('.pivot-name')?.focus());
+  }
+
+  /** Mantiene la navegación de teclado dentro del diálogo; recibe la tecla y permite cerrar con Escape sin perder datos guardados. */
+  protected onPivotKeydown(event: KeyboardEvent): void {
+    event.stopPropagation();
+    if (event.key === 'Escape' && !this.pivotBusy()) {
+      event.preventDefault();
+      this.closePivot();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const panel = event.currentTarget as HTMLElement;
+    const controls = Array.from(
+      panel.querySelectorAll<HTMLElement>(
+        'button:not(:disabled),input:not(:disabled),select:not(:disabled)',
+      ),
+    ).filter((e) => e.getClientRects().length > 0);
+    const first = controls[0],
+      last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
+
+  /** Cierra el panel e invalida solicitudes de vista previa; no recibe argumentos ni descarta cambios del archivo. */
+  protected closePivot(): void {
+    this.pivotEpoch++;
+    this.pivotDraft.set(null);
+    this.pivotPreview.set(null);
+    this.pivotError.set(null);
+  }
+
+  /** Recibe propiedades nuevas del borrador; actualiza el formulario y borra una vista previa obsoleta. */
+  protected changePivot(change: Partial<PivotDefinition>): void {
+    const draft = this.pivotDraft();
+    if (!draft) return;
+    this.pivotEpoch++;
+    this.pivotDraft.set({ ...draft, ...change });
+    this.pivotPreview.set(null);
+    this.pivotError.set(null);
+  }
+
+  /** Cambia la hoja de origen; recibe su nombre y reinicia el rango y los campos sin modificar el XLSX. */
+  protected changePivotSource(name: string): void {
+    const sheet = this.xlsxSheets().find((s) => s.name === name);
+    if (!sheet) return;
+    this.changePivot({
+      sourceSheet: name,
+      sourceRange: `A1:${this.getColumnLabel(Math.max(0, sheet.colCount - 1))}${Math.max(2, sheet.data.length)}`,
+      rows: [0],
+      columns: [],
+      values: [{ field: Math.max(0, sheet.colCount - 1), aggregate: 'sum' }],
+      filters: [],
+    });
+  }
+
+  /** Mueve un campo al área elegida o lo quita; recibe eje e índice de campo y no modifica los datos fuente. */
+  protected togglePivotField(axis: 'rows' | 'columns', field: number): void {
+    const draft = this.pivotDraft();
+    if (!draft) return;
+    const opposite = axis === 'rows' ? 'columns' : 'rows';
+    this.changePivot({
+      [axis]: draft[axis].includes(field)
+        ? draft[axis].filter((f) => f !== field)
+        : [...draft[axis], field],
+      [opposite]: draft[opposite].filter((f) => f !== field),
+      filters: draft.filters.filter((f) => f.field !== field),
+    });
+  }
+
+  /** Reordena los niveles del cruce; recibe eje, posición y dirección, y actualiza sólo el borrador. */
+  protected movePivotField(axis: 'rows' | 'columns', index: number, direction: number): void {
+    const draft = this.pivotDraft();
+    if (!draft) return;
+    const fields = [...draft[axis]],
+      next = index + direction;
+    if (next < 0 || next >= fields.length) return;
+    [fields[index], fields[next]] = [fields[next], fields[index]];
+    this.changePivot({ [axis]: fields });
+  }
+
+  /** Recibe índice y propiedades del valor; agrega, modifica o quita una agregación del borrador. */
+  protected changePivotValue(
+    index: number,
+    change: { field?: number; aggregate?: PivotAggregate } | null,
+  ): void {
+    const draft = this.pivotDraft();
+    if (!draft) return;
+    const values = draft.values.map((v) => ({ ...v }));
+    if (change === null) values.splice(index, 1);
+    else if (index >= values.length)
+      values.push({
+        field: change.field ?? Math.max(0, this.pivotHeaders().length - 1),
+        aggregate: change.aggregate ?? 'sum',
+      });
+    else values[index] = { ...values[index], ...change };
+    this.changePivot({ values });
+  }
+
+  /** Recibe un campo; retorna sus valores tipados únicos como opciones JSON, incluyendo celdas vacías. */
+  protected pivotFilterOptions(field: number): { label: string; value: string }[] {
+    const draft = this.pivotDraft();
+    if (!draft) return [];
+    const [a, b] = draft.sourceRange.replace(/\$/g, '').split(':').map(spreadsheetAddress);
+    if (!a || !b) return [];
+    const sheet = this.xlsxSheets().find((s) => s.name === draft.sourceSheet),
+      values = new Map<string, string>();
+    for (let row = a.row + 1; row <= b.row && row < a.row + 100001; row++) {
+      const value = sheet?.data[row]?.[a.col + field] ?? null;
+      values.set(JSON.stringify(value), value === null ? '(Vacío)' : String(value));
+    }
+    return Array.from(values, ([value, label]) => ({ value, label }));
+  }
+
+  /** Recibe un valor escalar de filtro; retorna su representación estable para un selector HTML. */
+  protected pivotFilterKey(value: XlsxCellValue): string {
+    return JSON.stringify(value);
+  }
+
+  /** Agrega o cambia un filtro de igualdad; recibe posición, campo y opción JSON, y actualiza el borrador. */
+  protected changePivotFilter(index: number, field: number, value?: string): void {
+    const draft = this.pivotDraft();
+    if (!draft) return;
+    const filters = draft.filters.map((f) => ({ ...f })),
+      encoded = value ?? this.pivotFilterOptions(field)[0]?.value ?? 'null';
+    filters[index] = { field, value: JSON.parse(encoded) as XlsxCellValue };
+    this.changePivot({
+      filters,
+      rows: draft.rows.filter((f) => f !== field),
+      columns: draft.columns.filter((f) => f !== field),
+    });
+  }
+
+  /** Quita un filtro; recibe su posición y conserva la distribución restante. */
+  protected removePivotFilter(index: number): void {
+    const draft = this.pivotDraft();
+    if (draft) this.changePivot({ filters: draft.filters.filter((_, i) => i !== index) });
+  }
+
+  /** Elige el primer campo libre para un filtro nuevo; no recibe argumentos ni modifica el archivo. */
+  protected addPivotFilter(): void {
+    const draft = this.pivotDraft();
+    if (!draft) return;
+    const field = this.pivotHeaders().findIndex(
+      (_, i) =>
+        !draft.rows.includes(i) &&
+        !draft.columns.includes(i) &&
+        !draft.filters.some((f) => f.field === i),
+    );
+    if (field >= 0) this.changePivotFilter(draft.filters.length, field);
+  }
+
+  /** Calcula la vista previa local; no recibe argumentos y publica errores de validación sin guardar cambios. */
+  protected async previewPivot(): Promise<void> {
+    const draft = this.pivotDraft();
+    if (!draft || this.pivotBusy()) return;
+    const epoch = this.pivotEpoch;
+    this.pivotBusy.set(true);
+    this.pivotError.set(null);
+    try {
+      const result = await window.electronAPI.xlsxPivot(
+        this.xlsxBase64,
+        'preview',
+        structuredClone(draft),
+      );
+      if (epoch !== this.pivotEpoch) return;
+      if (!result.success || !result.preview) throw Error(result.error ?? 'PIVOT_SOURCE');
+      this.pivotPreview.set(result.preview);
+    } catch (error) {
+      if (epoch === this.pivotEpoch) this.pivotError.set(this.pivotErrorKey(error));
+    } finally {
+      this.pivotBusy.set(false);
+    }
+  }
+
+  /** Recibe un error del motor; retorna una clave de traducción conocida en lugar de presentar detalles internos. */
+  private pivotErrorKey(error: unknown): string {
+    const code = error instanceof Error ? error.message : '';
+    return `NOTE_EDITOR.${['PIVOT_NAME', 'PIVOT_RANGE', 'PIVOT_SOURCE', 'PIVOT_ERRORS', 'PIVOT_HEADERS', 'PIVOT_FIELDS', 'PIVOT_LIMIT', 'PIVOT_DUPLICATE', 'PIVOT_NOT_FOUND'].includes(code) ? code : 'PIVOT_SAVE_ERROR'}`;
+  }
+
+  /** Crea/actualiza la tabla y su caché nativa; no recibe argumentos y guarda el libro antes de abrir su hoja de salida. */
+  protected async savePivot(): Promise<void> {
+    const draft = this.pivotDraft(),
+      noteId = this.pivotNoteId;
+    if (!draft || noteId === null || this.pivotBusy()) return;
+    if (noteId !== this.noteService.selectedNoteId()) {
+      this.closePivot();
+      return;
+    }
+    this.pivotBusy.set(true);
+    this.xlsxSaving.set(true);
+    this.pivotError.set(null);
+    const operation = this.xlsxSaveQueue.then(async () => {
+      this.pushUndoSnapshot();
+      const result = await window.electronAPI.xlsxPivot(
+        this.xlsxBase64,
+        'save',
+        structuredClone(draft),
+      );
+      if (!result.success || !result.base64 || !result.pivot)
+        throw Error(result.error ?? 'PIVOT_SOURCE');
+      await this.applyXlsxWorkbook(result.base64, noteId, result.pivot.targetSheet);
+    });
+    this.xlsxSaveQueue = operation.catch(() => {});
+    try {
+      await operation;
+      this.closePivot();
+    } catch (error) {
+      this.pivotError.set(this.pivotErrorKey(error));
+    } finally {
+      this.pivotBusy.set(false);
+      this.xlsxSaving.set(false);
+    }
+  }
+
+  /** Recalcula las tablas desde sus orígenes; no recibe argumentos y conserva los últimos resultados si un rango quedó inválido. */
+  protected async refreshPivots(): Promise<void> {
+    const noteId = this.noteService.selectedNoteId();
+    if (noteId === null || this.xlsxSaving()) return;
+    this.xlsxSaving.set(true);
+    const target = this.activeSheet?.name;
+    const operation = this.xlsxSaveQueue.then(async () => {
+      this.pushUndoSnapshot();
+      const result = await window.electronAPI.xlsxPivot(this.xlsxBase64, 'refresh');
+      if (!result.success || !result.base64) throw Error(result.error ?? 'PIVOT_SOURCE');
+      this.pivotWarnings.set(result.warnings ?? []);
+      await this.applyXlsxWorkbook(result.base64, noteId, target);
+    });
+    this.xlsxSaveQueue = operation.catch(() => {});
+    try {
+      await operation;
+    } catch {
+      this.xlsxError.set('NOTE_EDITOR.PIVOT_SAVE_ERROR');
+    } finally {
+      this.xlsxSaving.set(false);
+    }
+  }
+
+  /** Recibe XLSX, nota propietaria y hoja destino; persiste, vuelve a leer las hojas y selecciona el resultado si la nota sigue abierta. */
+  private async applyXlsxWorkbook(base64: string, noteId: number, target?: string): Promise<void> {
+    // Una tabla dinámica puede haber cambiado sus resultados sin pasar por la edición de celdas.
+    const refreshedCharts = await window.electronAPI.xlsxChart(base64, 'refresh');
+    if (!refreshedCharts.success || !refreshedCharts.base64)
+      throw Error(refreshedCharts.error ?? 'CHART_SOURCE');
+    base64 = refreshedCharts.base64;
+    const parsed = await window.electronAPI.xlsxParseData(base64);
+    if (!parsed.success || !parsed.sheets) throw Error('PIVOT_SOURCE');
+    await window.electronAPI.notesUpdate(noteId, { file_data: base64 });
+    if (this.noteService.selectedNoteId() !== noteId) return;
+    this.xlsxBase64 = base64;
+    this.xlsxCellFormats.clear();
+    this.xlsxOrigins = undefined;
+    this.xlsxPivots.set(parsed.pivots ?? []);
+    this.xlsxCharts.set(parsed.charts ?? []);
+    this.xlsxSheets.set(parsed.sheets);
+    this.loadXlsxFormulaMetadata(parsed.sheets);
+    this.selectSheet(
+      Math.max(
+        0,
+        parsed.sheets.findIndex((s) => s.name === target),
+      ),
+    );
+  }
+
   private async loadXlsxData(noteId: number): Promise<void> {
+    this.tableDraft.set(null);
+    this.tableError.set(null);
+    await this.xlsxSaveQueue;
+    if (this.noteService.selectedNoteId() !== noteId) return;
+    this.xlsxOrigins = undefined;
+    this.pendingTableStructure = false;
+    this.xlsxClipboard = null;
+    this.xlsxError.set(null);
     this.xlsxLoading.set(true);
     this.xlsxSheets.set([]);
+    this.xlsxPivots.set([]);
+    this.xlsxCharts.set([]);
+    this.selectedChart.set(null);
+    this.chartDrag = null;
+    this.closeChart();
+    this.closePivot();
+    this.pivotWarnings.set([]);
     this.activeSheetIndex.set(0);
     this.editingCell.set(null);
     this.selectedCell.set(null);
@@ -762,6 +1734,11 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     this.xlsxCellFormats.clear();
     this.xlsxCellFormulas.clear();
     this.xlsxUndoStack = [];
+    this.xlsxCachedFormulaCount.set(0);
+    this.xlsxSpills.clear();
+    this.xlsxArrayFormulas.clear();
+    this.xlsxSpillOwners.clear();
+    this.xlsxImportedFormulaCache.clear();
     this.xlsxRedoStack = [];
     try {
       const fullNote = await window.electronAPI.notesGetById(noteId);
@@ -771,6 +1748,11 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       const result = await window.electronAPI.xlsxParseData(this.xlsxBase64);
       if (this.noteService.selectedNoteId() !== noteId) return;
       if (result.success && result.sheets) {
+        this.xlsxPivots.set(result.pivots ?? []);
+        this.xlsxCharts.set(result.charts ?? []);
+        this.pivotWarnings.set(
+          (result.pivots ?? []).filter((p) => p.error).map((p) => p.name + ': ' + p.error),
+        );
         this.loadXlsxFormulaMetadata(result.sheets);
         this.xlsxSheets.set(result.sheets);
         this.recalculateXlsxFormulas();
@@ -822,6 +1804,69 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     return sheet.data[row]?.[col] ?? null;
   }
 
+  /**
+   * Muestra números, fechas y porcentajes originales sin alterar el valor editable.
+   * @param row Fila de la celda, con base cero.
+   * @param col Columna de la celda, con base cero.
+   * @returns Texto formateado si el valor no cambió, o el valor actual.
+   */
+  protected getCellDisplayValue(row: number, col: number): XlsxCellValue {
+    const value = this.getCellValue(row, col),
+      code = this.xlsxCellFormats.get(this.getCellFormatKey(row, col))?.numberFormat;
+    if (typeof value === 'number' && code && code !== 'General') {
+      if (code === 'yyyy-mm-dd')
+        return new Date(Date.UTC(1899, 11, 30) + value * 86400000).toISOString().slice(0, 10);
+      const numeric = new Intl.NumberFormat(this.translate.currentLang || 'es', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+        useGrouping: code.includes(','),
+      }).format(code.includes('%') ? value * 100 : value);
+      return (code.includes('$') ? '$' : '') + numeric + (code.includes('%') ? '%' : '');
+    }
+    const formatted = this.activeSheet?.formattedCells?.[row + ':' + col];
+    return formatted && formatted.value === value ? formatted.text : value;
+  }
+
+  /**
+   * Resuelve el tamaño y la posición de una celda combinada.
+   * @param row Fila de la celda, con base cero.
+   * @param col Columna de la celda, con base cero.
+   * @returns Spans de la celda principal e indicador para ocultar las celdas cubiertas.
+   */
+  protected getCellMerge(
+    row: number,
+    col: number,
+  ): { rows: number; columns: number; hidden: boolean } {
+    const merge = this.activeSheet?.merges?.find(
+      (range) => row >= range.s.r && row <= range.e.r && col >= range.s.c && col <= range.e.c,
+    );
+    return merge
+      ? {
+          rows: merge.e.r - merge.s.r + 1,
+          columns: merge.e.c - merge.s.c + 1,
+          hidden: row !== merge.s.r || col !== merge.s.c,
+        }
+      : { rows: 1, columns: 1, hidden: false };
+  }
+
+  /**
+   * Calcula el tamaño de una celda normal o combinada con los anchos y altos originales.
+   * @param row Fila con base cero.
+   * @param col Columna con base cero.
+   * @returns Dimensiones de la celda visible en píxeles.
+   */
+  protected getCellDimensions(row: number, col: number): { width: number; height: number } {
+    const merge = this.getCellMerge(row, col);
+    return {
+      width: Array.from({ length: merge.columns }, (_, offset) =>
+        this.getColumnWidth(col + offset),
+      ).reduce((sum, value) => sum + value, 0),
+      height: Array.from({ length: merge.rows }, (_, offset) =>
+        this.getRowHeight(row + offset),
+      ).reduce((sum, value) => sum + value, 0),
+    };
+  }
+
   /** Check if a cell value is numeric for right-alignment */
   protected isCellNumeric(row: number, col: number): boolean {
     const val = this.getCellValue(row, col);
@@ -850,57 +1895,64 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     event.preventDefault();
     event.stopPropagation();
     this.pushUndoSnapshot();
-    this.xlsxResize = { type: 'column', index, start: event.clientX, initialSize: this.getColumnWidth(index) };
+    this.xlsxResize = {
+      type: 'column',
+      index,
+      start: event.clientX,
+      initialSize: this.getColumnWidth(index),
+    };
   }
 
   protected startRowResize(event: MouseEvent, index: number): void {
     event.preventDefault();
     event.stopPropagation();
     this.pushUndoSnapshot();
-    this.xlsxResize = { type: 'row', index, start: event.clientY, initialSize: this.getRowHeight(index) };
+    this.xlsxResize = {
+      type: 'row',
+      index,
+      start: event.clientY,
+      initialSize: this.getRowHeight(index),
+    };
   }
 
   @HostListener('document:mousemove', ['$event'])
   protected onSpreadsheetResizeMove(event: MouseEvent): void {
+    this.onChartDrag(event);
     const resize = this.xlsxResize;
     const sheet = this.activeSheet;
     if (!resize || !sheet) return;
     event.preventDefault();
     if (resize.type === 'column') {
       const widths = [...(sheet.colWidths ?? [])];
-      widths[resize.index] = Math.max(36, Math.min(600, resize.initialSize + event.clientX - resize.start));
+      widths[resize.index] = Math.max(
+        36,
+        Math.min(600, resize.initialSize + event.clientX - resize.start),
+      );
       sheet.colWidths = widths;
     } else {
       const heights = [...(sheet.rowHeights ?? [])];
-      heights[resize.index] = Math.max(18, Math.min(300, resize.initialSize + event.clientY - resize.start));
+      heights[resize.index] = Math.max(
+        18,
+        Math.min(300, resize.initialSize + event.clientY - resize.start),
+      );
       sheet.rowHeights = heights;
     }
     this.xlsxSheets.set([...this.xlsxSheets()]);
   }
 
+  /** Guarda dimensiones con la misma cola del libro; no recibe argumentos ni compite con otras ediciones. */
   private async persistXlsxDimensions(): Promise<void> {
-    const sheet = this.activeSheet;
-    if (!sheet) return;
-    try {
-      const result = await window.electronAPI.xlsxUpdateDimensions(
-        this.xlsxBase64,
-        this.activeSheetIndex(),
-        sheet.colWidths ?? [],
-        sheet.rowHeights ?? [],
-      );
-      if (!result.success || !result.base64) throw new Error(result.error ?? 'No se pudieron guardar las dimensiones');
-      this.xlsxBase64 = result.base64;
-      const noteId = this.noteService.selectedNoteId();
-      if (noteId !== null) {
-        this.skipNextSync = true;
-        await window.electronAPI.notesUpdate(noteId, { file_data: result.base64 });
-      }
-    } catch (error) {
-      console.error('Error persisting xlsx dimensions:', error);
-    }
+    await this.persistXlsxData();
   }
 
   protected selectCell(row: number, col: number): void {
+    const merge = this.activeSheet?.merges?.find(
+      (m) => row >= m.s.r && row <= m.e.r && col >= m.s.c && col <= m.e.c,
+    );
+    if (merge) {
+      row = merge.s.r;
+      col = merge.s.c;
+    }
     this.selectedCell.set({ row, col });
     this.xlsxSelectionStart.set({ row, col });
     this.xlsxSelectionEnd.set({ row, col });
@@ -923,6 +1975,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   }
 
   protected startEditCell(row: number, col: number, initialValue?: string): void {
+    if (this.activePivot() || this.rejectSpillEdit(row, col)) return;
     this.editingCell.set({ row, col });
     this.selectedCell.set({ row, col });
     // Show formula for editing if the cell has one
@@ -982,6 +2035,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   }
 
   protected async commitCellEdit(fromBlur = false): Promise<void> {
+    if (this.activePivot()) return;
     // A cell click while composing a formula temporarily moves focus so a range can be inserted.
     if (fromBlur && this.xlsxFormulaRangeDragging) return;
     // Once range capture finishes, a real focus change must still commit the edit.
@@ -993,6 +2047,20 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     }
     const cell = this.editingCell();
     if (!cell) return;
+    if (this.rejectSpillEdit(cell.row, cell.col)) {
+      this.editingCell.set(null);
+      return;
+    }
+    if (
+      this.formulaBarValue().startsWith('=') &&
+      this.activeSheet?.tables?.some((t) => {
+        const b = tableBounds(t.ref)!;
+        return t.headerRows && cell.row === b.a.row && cell.col >= b.a.col && cell.col <= b.b.col;
+      })
+    ) {
+      this.xlsxError.set('NOTE_EDITOR.TABLE_HEADER_ERROR');
+      return;
+    }
     this.pushUndoSnapshot();
     const rawValue = this.formulaBarValue();
     this.editingCell.set(null);
@@ -1036,31 +2104,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       this.formulaBarValue.set(numVal != null ? String(numVal) : '');
     }
 
-    // Persist to backend
-    try {
-      const updates = new Map<string, { row: number; col: number; value: XlsxCellValue; formula?: string | null }>();
-      updates.set(`${cell.row}:${cell.col}`, {
-        row: cell.row,
-        col: cell.col,
-        value: this.getCellValue(cell.row, cell.col),
-        formula: this.xlsxCellFormulas.get(formulaKey) ?? null,
-      });
-      for (const formulaCell of this.activeFormulaCells()) {
-        updates.set(`${formulaCell.row}:${formulaCell.col}`, formulaCell);
-      }
-      const result = await window.electronAPI.xlsxBatchUpdateCells(this.xlsxBase64, sheetIdx, [...updates.values()]);
-      if (result.success && result.base64) {
-        this.xlsxBase64 = result.base64;
-        // Save updated file_data to note
-        const noteId = this.noteService.selectedNoteId();
-        if (noteId !== null) {
-          this.skipNextSync = true;
-          await window.electronAPI.notesUpdate(noteId, { file_data: result.base64 });
-        }
-      }
-    } catch (err) {
-      console.error('Error updating cell:', err);
-    }
+    await this.persistXlsxData();
   }
 
   protected onCellKeydown(event: KeyboardEvent): void {
@@ -1074,18 +2118,25 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     if (event.key === 'Enter') {
       event.preventDefault();
       void this.commitCellEdit();
-      const next = nextSpreadsheetCell(cell, event.shiftKey ? 'up' : 'down', this.displayRowCount, this.displayColCount);
+      const next = nextSpreadsheetCell(
+        cell,
+        event.shiftKey ? 'up' : 'down',
+        this.displayRowCount,
+        this.displayColCount,
+      );
       this.selectCell(next.row, next.col);
       this.focusXlsxGridAfterNavigation();
     } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
       event.preventDefault();
       void this.commitCellEdit();
-      const direction = ({
-        ArrowUp: 'up',
-        ArrowDown: 'down',
-        ArrowLeft: 'left',
-        ArrowRight: 'right',
-      } as const)[event.key as 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight'];
+      const direction = (
+        {
+          ArrowUp: 'up',
+          ArrowDown: 'down',
+          ArrowLeft: 'left',
+          ArrowRight: 'right',
+        } as const
+      )[event.key as 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight'];
       const next = nextSpreadsheetCell(cell, direction, this.displayRowCount, this.displayColCount);
       this.selectCell(next.row, next.col);
       this.focusXlsxGridAfterNavigation();
@@ -1096,7 +2147,12 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     } else if (event.key === 'Tab') {
       event.preventDefault();
       void this.commitCellEdit();
-      const next = nextSpreadsheetCell(cell, event.shiftKey ? 'left' : 'right', this.displayRowCount, this.displayColCount);
+      const next = nextSpreadsheetCell(
+        cell,
+        event.shiftKey ? 'left' : 'right',
+        this.displayRowCount,
+        this.displayColCount,
+      );
       this.selectCell(next.row, next.col);
       this.focusXlsxGridAfterNavigation();
     }
@@ -1104,6 +2160,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
   /** Called on every input change in cell or formula bar — updates highlights and manages range mode */
   protected onFormulaInput(value: string): void {
+    if (this.activePivot()) return;
     this.formulaBarValue.set(value);
     // Reset range insertion tracking on manual typing
     this.xlsxFormulaInsertPos = -1;
@@ -1128,7 +2185,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     }
     const normalized = token.toLocaleUpperCase();
     const matches = this.formulaCatalog
-      .filter(item => item.name.startsWith(normalized))
+      .filter((item) => item.name.startsWith(normalized))
       .slice(0, 7);
     this.formulaSuggestions.set(matches);
     this.activeFormulaSuggestion.set(0);
@@ -1153,7 +2210,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     if (event.altKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       event.preventDefault();
       const direction = event.key === 'ArrowDown' ? 1 : -1;
-      this.activeFormulaSuggestion.set((this.activeFormulaSuggestion() + direction + suggestions.length) % suggestions.length);
+      this.activeFormulaSuggestion.set(
+        (this.activeFormulaSuggestion() + direction + suggestions.length) % suggestions.length,
+      );
       return true;
     }
     if (event.key === 'Tab' || event.key === 'Enter') {
@@ -1177,7 +2236,12 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       if (!cell) return;
       if (!this.editingCell()) this.editingCell.set(cell);
       void this.commitCellEdit();
-      const next = nextSpreadsheetCell(cell, event.shiftKey ? 'up' : 'down', this.displayRowCount, this.displayColCount);
+      const next = nextSpreadsheetCell(
+        cell,
+        event.shiftKey ? 'up' : 'down',
+        this.displayRowCount,
+        this.displayColCount,
+      );
       this.selectCell(next.row, next.col);
       this.focusXlsxGridAfterNavigation();
     } else if (event.key === 'Escape') {
@@ -1188,6 +2252,10 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   }
 
   protected onGridKeydown(event: KeyboardEvent): void {
+    if (this.xlsxSaving()) {
+      event.preventDefault();
+      return;
+    }
     const cell = this.selectedCell();
     if (!cell || this.editingCell()) return;
     const sheet = this.activeSheet;
@@ -1236,7 +2304,10 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
         const anchor = this.xlsxSelectionStart() ?? cell;
         this.xlsxSelectionStart.set(anchor);
         const end = this.xlsxSelectionEnd() ?? cell;
-        this.xlsxSelectionEnd.set({ row: Math.min(end.row + 1, this.displayRowCount - 1), col: end.col });
+        this.xlsxSelectionEnd.set({
+          row: Math.min(end.row + 1, this.displayRowCount - 1),
+          col: end.col,
+        });
       } else {
         this.selectCell(newRow, cell.col);
       }
@@ -1258,7 +2329,10 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
         const anchor = this.xlsxSelectionStart() ?? cell;
         this.xlsxSelectionStart.set(anchor);
         const end = this.xlsxSelectionEnd() ?? cell;
-        this.xlsxSelectionEnd.set({ row: end.row, col: Math.min(end.col + 1, this.displayColCount - 1) });
+        this.xlsxSelectionEnd.set({
+          row: end.row,
+          col: Math.min(end.col + 1, this.displayColCount - 1),
+        });
       } else {
         this.selectCell(cell.row, newCol);
       }
@@ -1275,7 +2349,12 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       }
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const next = nextSpreadsheetCell(cell, event.shiftKey ? 'up' : 'down', this.displayRowCount, this.displayColCount);
+      const next = nextSpreadsheetCell(
+        cell,
+        event.shiftKey ? 'up' : 'down',
+        this.displayRowCount,
+        this.displayColCount,
+      );
       this.selectCell(next.row, next.col);
     } else if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
@@ -1318,7 +2397,12 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   // ── Range selection helpers ──
 
   /** Normalized selection range */
-  protected get xlsxRange(): { startRow: number; startCol: number; endRow: number; endCol: number } | null {
+  protected get xlsxRange(): {
+    startRow: number;
+    startCol: number;
+    endRow: number;
+    endCol: number;
+  } | null {
     const s = this.xlsxSelectionStart();
     const e = this.xlsxSelectionEnd();
     if (!s || !e) {
@@ -1432,8 +2516,10 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       this.xlsxFormulaRangeCurrent = { row, col };
       const a = this.xlsxFormulaRangeAnchor;
       this.insertOrUpdateFormulaRange(
-        Math.min(a.row, row), Math.min(a.col, col),
-        Math.max(a.row, row), Math.max(a.col, col)
+        Math.min(a.row, row),
+        Math.min(a.col, col),
+        Math.max(a.row, row),
+        Math.max(a.col, col),
       );
       return;
     }
@@ -1443,6 +2529,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
   @HostListener('document:mouseup')
   onDocumentMouseup(): void {
+    void this.finishChartDrag();
     if (this.xlsxResize) {
       this.xlsxResize = null;
       void this.persistXlsxDimensions();
@@ -1533,112 +2620,175 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
   // ── Clipboard operations ──
 
+  /** Copia el rango con fórmulas y estilos; no recibe argumentos y escribe TSV al portapapeles. */
   protected xlsxCopy(): void {
     const r = this.xlsxRange;
     if (!r) return;
-    const data: (string | number | boolean | null)[][] = [];
+    const data: XlsxCellValue[][] = [],
+      formulas: (string | null)[][] = [],
+      formats: SpreadsheetFormat[][] = [];
     for (let row = r.startRow; row <= r.endRow; row++) {
-      const rowData: (string | number | boolean | null)[] = [];
+      data.push([]);
+      formulas.push([]);
+      formats.push([]);
       for (let col = r.startCol; col <= r.endCol; col++) {
-        rowData.push(this.getCellValue(row, col));
+        data.at(-1)!.push(this.getCellValue(row, col));
+        formulas.at(-1)!.push(this.xlsxCellFormulas.get(this.getCellFormatKey(row, col)) ?? null);
+        formats.at(-1)!.push({ ...this.getCellFormat(row, col) });
       }
-      data.push(rowData);
     }
-    this.xlsxClipboard = { data, startRow: r.startRow, startCol: r.startCol, isCut: false };
+    const text = data.map((row) => row.map((value) => String(value ?? '')).join('\t')).join('\n');
+    this.xlsxClipboard = {
+      data,
+      formulas,
+      formats,
+      startRow: r.startRow,
+      startCol: r.startCol,
+      sheet: this.activeSheetIndex(),
+      text,
+      isCut: false,
+    };
     this.xlsxHasClipboard.set(true);
-
-    // Also copy to system clipboard as TSV
-    const tsv = data.map(row => row.map(v => v != null ? String(v) : '').join('\t')).join('\n');
-    navigator.clipboard.writeText(tsv).catch(() => {});
+    void navigator.clipboard
+      .writeText(text)
+      .catch(() => this.xlsxError.set('NOTE_EDITOR.XLSX_CLIPBOARD_ERROR'));
   }
 
+  /** Marca el rango para moverlo; no borra el origen hasta completar el pegado y conservar una copia. */
   protected xlsxCut(): void {
-    const r = this.xlsxRange;
-    if (!r) return;
-    const data: (string | number | boolean | null)[][] = [];
-    for (let row = r.startRow; row <= r.endRow; row++) {
-      const rowData: (string | number | boolean | null)[] = [];
-      for (let col = r.startCol; col <= r.endCol; col++) {
-        rowData.push(this.getCellValue(row, col));
-      }
-      data.push(rowData);
-    }
-    this.xlsxClipboard = { data, startRow: r.startRow, startCol: r.startCol, isCut: true };
-    this.xlsxHasClipboard.set(true);
-
-    // Also copy to system clipboard and clear source cells
-    const tsv = data.map(row => row.map(v => v != null ? String(v) : '').join('\t')).join('\n');
-    navigator.clipboard.writeText(tsv).catch(() => {});
-
-    // Clear source cells
-    this.clearRangeCells(r.startRow, r.startCol, r.endRow, r.endCol);
+    if (this.activePivot()) return;
+    this.xlsxCopy();
+    if (this.xlsxClipboard) this.xlsxClipboard.isCut = true;
   }
 
+  /** Pega TSV externo o celdas internas; mueve referencias relativas y guarda el libro completo. */
   protected async xlsxPaste(): Promise<void> {
-    const sc = this.selectedCell();
-    if (!sc) return;
-    this.pushUndoSnapshot();
-
-    let data: (string | number | boolean | null)[][] | null = null;
-
-    if (this.xlsxClipboard) {
-      data = this.xlsxClipboard.data;
-      if (this.xlsxClipboard.isCut) {
-        this.xlsxClipboard = null;
-        this.xlsxHasClipboard.set(false);
+    if (this.activePivot()) return;
+    const sc = this.selectedCell(),
+      noteId = this.noteService.selectedNoteId();
+    if (!sc || this.xlsxSaving()) return;
+    let clipboard = this.xlsxClipboard,
+      text = '';
+    try {
+      text = (await navigator.clipboard.readText()).replace(/\r\n/g, '\n');
+    } catch {
+      if (!clipboard) {
+        this.xlsxError.set('NOTE_EDITOR.XLSX_CLIPBOARD_ERROR');
+        return;
       }
-    } else {
-      // Try system clipboard
-      try {
-        const text = await navigator.clipboard.readText();
-        if (text) {
-          data = text.split('\n').map(row => row.split('\t').map(v => {
-            return this.parseSmartNumber(v);
-          }));
-        }
-      } catch { /* clipboard access denied */ }
     }
-
-    if (!data || data.length === 0) return;
-
-    const sheets = this.xlsxSheets();
-    const sheetIdx = this.activeSheetIndex();
-    const sheet = sheets[sheetIdx];
+    if (text && text !== clipboard?.text) clipboard = null;
+    const data =
+      clipboard?.data ??
+      text
+        .replace(/\n$/, '')
+        .split('\n')
+        .map((row) => row.split('\t').map((value) => this.parseSmartNumber(value) ?? value));
+    if (!data.length || (!clipboard && !text) || this.noteService.selectedNoteId() !== noteId)
+      return;
+    const sheet = this.activeSheet;
     if (!sheet) return;
-
-    // Paste data starting at selected cell
-    for (let dr = 0; dr < data.length; dr++) {
-      const targetRow = sc.row + dr;
-      while (sheet.data.length <= targetRow) sheet.data.push([]);
-      for (let dc = 0; dc < data[dr].length; dc++) {
-        const targetCol = sc.col + dc;
-        while (sheet.data[targetRow].length <= targetCol) sheet.data[targetRow].push(null);
-        sheet.data[targetRow][targetCol] = data[dr][dc];
-      }
+    if (
+      data.some((row, dr) =>
+        row.some((_, dc) =>
+          this.xlsxSpillOwners.has(this.getCellFormatKey(sc.row + dr, sc.col + dc)),
+        ),
+      )
+    ) {
+      this.xlsxError.set('NOTE_EDITOR.SPILL_CHILD');
+      return;
     }
-    this.xlsxSheets.set([...sheets]);
-
-    // Persist to backend — rebuild the whole xlsx
-    await this.persistXlsxData();
-
-    // Select pasted range
+    if (
+      clipboard?.isCut &&
+      clipboard.data.some((row, dr) =>
+        row.some((_, dc) =>
+          this.xlsxSpillOwners.has(
+            clipboard!.sheet + ':' + (clipboard!.startRow + dr) + ':' + (clipboard!.startCol + dc),
+          ),
+        ),
+      )
+    ) {
+      this.xlsxError.set('NOTE_EDITOR.SPILL_CHILD');
+      return;
+    }
+    this.pushUndoSnapshot();
+    if (clipboard?.isCut) {
+      const source = this.xlsxSheets()[clipboard.sheet];
+      clipboard.data.forEach((row, dr) =>
+        row.forEach((_, dc) => {
+          const r = clipboard!.startRow + dr,
+            c = clipboard!.startCol + dc;
+          if (source?.data[r]) source.data[r][c] = null;
+          this.xlsxCellFormulas.delete(clipboard!.sheet + ':' + r + ':' + c);
+        }),
+      );
+    }
+    data.forEach((row, dr) =>
+      row.forEach((value, dc) => {
+        const r = sc.row + dr,
+          c = sc.col + dc,
+          key = this.getCellFormatKey(r, c);
+        while (sheet.data.length <= r) sheet.data.push([]);
+        sheet.data[r][c] = value;
+        const formula =
+          clipboard?.formulas[dr]?.[dc] ??
+          (typeof value === 'string' && value.startsWith('=') ? value : null);
+        if (formula)
+          this.xlsxCellFormulas.set(
+            key,
+            clipboard?.isCut
+              ? formula
+              : translateSpreadsheetFormula(
+                  formula,
+                  clipboard ? sc.row - clipboard.startRow : 0,
+                  clipboard ? sc.col - clipboard.startCol : 0,
+                ),
+          );
+        else this.xlsxCellFormulas.delete(key);
+        if (clipboard) this.xlsxCellFormats.set(key, { ...clipboard.formats[dr][dc] });
+        sheet.colCount = Math.max(sheet.colCount, c + 1);
+      }),
+    );
+    if (clipboard?.isCut) {
+      this.xlsxClipboard = null;
+      this.xlsxHasClipboard.set(false);
+    }
+    this.xlsxSheets.set([...this.xlsxSheets()]);
     this.xlsxSelectionStart.set(sc);
-    this.xlsxSelectionEnd.set({ row: sc.row + data.length - 1, col: sc.col + (data[0]?.length ?? 1) - 1 });
+    this.xlsxSelectionEnd.set({
+      row: sc.row + data.length - 1,
+      col: sc.col + Math.max(...data.map((r) => r.length)) - 1,
+    });
+    await this.persistXlsxData();
   }
 
   protected async xlsxDeleteSelection(): Promise<void> {
+    if (this.activePivot()) return;
     const r = this.xlsxRange;
     if (!r) return;
     this.pushUndoSnapshot();
     await this.clearRangeCells(r.startRow, r.startCol, r.endRow, r.endCol);
   }
 
-  private async clearRangeCells(startRow: number, startCol: number, endRow: number, endCol: number): Promise<void> {
+  private async clearRangeCells(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+  ): Promise<void> {
     const sheets = this.xlsxSheets();
     const sheetIdx = this.activeSheetIndex();
     const sheet = sheets[sheetIdx];
     if (!sheet) return;
-
+    for (const [child, owner] of this.xlsxSpillOwners) {
+      const [s, r, c] = child.split(':').map(Number);
+      if (s !== sheetIdx || r < startRow || r > endRow || c < startCol || c > endCol) continue;
+      const [, ar, ac] = owner.split(':').map(Number);
+      if (ar < startRow || ar > endRow || ac < startCol || ac > endCol) {
+        this.xlsxError.set('NOTE_EDITOR.SPILL_CHILD');
+        return;
+      }
+    }
     for (let r = startRow; r <= endRow; r++) {
       if (!sheet.data[r]) continue;
       for (let c = startCol; c <= endCol; c++) {
@@ -1648,7 +2798,8 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       }
     }
     for (let r = startRow; r <= endRow; r++) {
-      for (let c = startCol; c <= endCol; c++) this.xlsxCellFormulas.delete(this.getCellFormatKey(r, c));
+      for (let c = startCol; c <= endCol; c++)
+        this.xlsxCellFormulas.delete(this.getCellFormatKey(r, c));
     }
     this.xlsxSheets.set([...sheets]);
     await this.persistXlsxData();
@@ -1667,23 +2818,32 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
   /** Restore a base64 snapshot: re-parse sheets and save to DB */
   private async restoreSnapshot(base64: string): Promise<void> {
+    const noteId = this.noteService.selectedNoteId();
+    if (noteId === null) return;
     this.xlsxBase64 = base64;
+    this.xlsxCellFormats.clear();
+    this.xlsxOrigins = undefined;
     const result = await window.electronAPI.xlsxParseData(base64);
+    if (this.noteService.selectedNoteId() !== noteId) return;
     if (result.success && result.sheets) {
+      this.xlsxPivots.set(result.pivots ?? []);
+      this.xlsxCharts.set(result.charts ?? []);
+      this.selectedChart.set(null);
       this.loadXlsxFormulaMetadata(result.sheets);
       this.xlsxSheets.set(result.sheets);
       this.recalculateXlsxFormulas();
+      if (this.activeSheetIndex() >= result.sheets.length)
+        this.selectSheet(Math.max(0, result.sheets.length - 1));
     }
     // Persist to DB
-    const noteId = this.noteService.selectedNoteId();
     if (noteId !== null) {
       this.skipNextSync = true;
       await window.electronAPI.notesUpdate(noteId, { file_data: base64 });
     }
   }
 
-  private async xlsxUndo(): Promise<void> {
-    if (this.xlsxUndoStack.length === 0) return;
+  protected async xlsxUndo(): Promise<void> {
+    if (this.xlsxSaving() || this.xlsxUndoStack.length === 0) return;
     // Save current state to redo
     if (this.xlsxBase64) {
       this.xlsxRedoStack.push(this.xlsxBase64);
@@ -1692,8 +2852,8 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     await this.restoreSnapshot(snapshot);
   }
 
-  private async xlsxRedo(): Promise<void> {
-    if (this.xlsxRedoStack.length === 0) return;
+  protected async xlsxRedo(): Promise<void> {
+    if (this.xlsxSaving() || this.xlsxRedoStack.length === 0) return;
     // Save current state to undo
     if (this.xlsxBase64) {
       this.xlsxUndoStack.push(this.xlsxBase64);
@@ -1704,57 +2864,216 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
   /** Persist all current sheet data to the xlsx backend */
   private async persistXlsxData(): Promise<void> {
-    const sheets = this.xlsxSheets();
-    const sheetIdx = this.activeSheetIndex();
-    const sheet = sheets[sheetIdx];
-    if (!sheet) return;
-
-    try {
-      this.recalculateXlsxFormulas();
-      const result = await window.electronAPI.xlsxReplaceSheetData(
-        this.xlsxBase64,
-        sheetIdx,
-        sheet.data,
-        this.activeFormulaCells(),
-        sheet.merges ?? [],
-      );
-      if (!result.success || !result.base64) throw new Error(result.error ?? 'No se pudo guardar la hoja');
-      this.xlsxBase64 = result.base64;
-      // Save to note
-      const noteId = this.noteService.selectedNoteId();
-      if (noteId !== null) {
-        this.skipNextSync = true;
-        await window.electronAPI.notesUpdate(noteId, { file_data: result.base64 });
+    const noteId = this.noteService.selectedNoteId();
+    if (noteId === null || !this.activeSheet) return;
+    this.synchronizeXlsxTables();
+    if (!this.synchronizeXlsxHeaders()) return;
+    this.recalculateXlsxFormulas();
+    const sheets = structuredClone(this.xlsxSheets());
+    const formulas = new Map(this.xlsxCellFormulas),
+      formats = new Map(Array.from(this.xlsxCellFormats, ([key, value]) => [key, { ...value }]));
+    for (let index = 0; index < sheets.length; index++)
+      for (const table of sheets[index].tables ?? []) {
+        const b = tableBounds(table.ref)!;
+        table.calculated = {};
+        for (let col = b.a.col; col <= b.b.col; col++) {
+          for (let row = b.a.row + table.headerRows; row <= b.b.row - table.totalRows; row++) {
+            const formula = formulas.get(index + ':' + row + ':' + col);
+            if (formula) {
+              table.calculated[table.columns[col - b.a.col]] = ooxmlSpreadsheetFormula(
+                translateSpreadsheetFormula(formula, b.a.row + table.headerRows - row, 0),
+              );
+              break;
+            }
+          }
+        }
       }
-    } catch (err) {
-      console.error('Error persisting xlsx data:', err);
+    for (let index = 0; index < sheets.length; index++)
+      for (const table of sheets[index].tables ?? []) {
+        if (!table.totalRows) continue;
+        const b = tableBounds(table.ref)!;
+        table.totalFormulas = {};
+        table.totals ??= table.columns.map(() => '');
+        table.columns.forEach((name, i) => {
+          const formula = formulas.get(index + ':' + b.b.row + ':' + (b.a.col + i));
+          const standard = tableTotalFormula(
+            table.totals?.[i] ?? '',
+            this.getColumnLabel(b.a.col + i) +
+              (b.a.row + table.headerRows + 1) +
+              ':' +
+              this.getColumnLabel(b.a.col + i) +
+              (b.b.row - table.totalRows + 1),
+          );
+          if (
+            formula &&
+            canonicalSpreadsheetFormula(formula) !== canonicalSpreadsheetFormula(standard ?? '')
+          ) {
+            table.totals![i] = 'custom';
+            table.totalFormulas![name] = ooxmlSpreadsheetFormula(formula);
+          }
+        });
+      }
+    const arrayFormulas = structuredClone([...this.xlsxArrayFormulas.values()]);
+    const active = this.activeSheetIndex(),
+      origins = this.xlsxOrigins;
+    this.xlsxOrigins = undefined;
+    this.xlsxSaving.set(true);
+    this.xlsxError.set(null);
+    // Serializar evita que dos respuestas IPC sobrescriban un cambio más reciente.
+    const save = this.xlsxSaveQueue.then(async () => {
+      let base64 = this.xlsxBase64;
+      for (let index = 0; index < sheets.length; index++) {
+        const sheet = sheets[index];
+        const updates = Array.from(formulas)
+          .filter(([key]) => key.startsWith(index + ':'))
+          .map(([key, formula]) => {
+            const [, row, col] = key.split(':').map(Number);
+            return {
+              row,
+              col,
+              formula: ooxmlSpreadsheetFormula(formula),
+              value: sheet.data[row]?.[col] ?? null,
+            };
+          });
+        const edits = Array.from(formats)
+          .filter(([key]) => key.startsWith(index + ':'))
+          .map(([key, format]) => {
+            const [, row, col] = key.split(':').map(Number);
+            return { row, col, format };
+          });
+        const result = await window.electronAPI.xlsxReplaceSheetData(
+          base64,
+          index,
+          sheet.data,
+          updates,
+          sheet.merges ?? [],
+          {
+            spills: arrayFormulas
+              .filter((s) => s.sheet === index)
+              .map(({ sheet, ...spill }) => spill),
+            formats: edits,
+            tables: sheet.tables,
+            hiddenRows: sheet.hiddenRows,
+            definedNames: sheet.definedNames,
+            colWidths: sheet.colWidths,
+            rowHeights: sheet.rowHeights,
+            origins: index === active ? origins : undefined,
+          },
+        );
+        if (!result.success || !result.base64)
+          throw Error(result.error ?? 'No se pudo guardar el libro');
+        base64 = result.base64;
+      }
+      const refreshed = await window.electronAPI.xlsxPivot(base64, 'refresh');
+      if (!refreshed.success || !refreshed.base64) throw Error(refreshed.error ?? 'PIVOT_SOURCE');
+      base64 = refreshed.base64;
+      this.pivotWarnings.set(refreshed.warnings ?? []);
+      const charts = await window.electronAPI.xlsxChart(base64, 'refresh');
+      if (!charts.success || !charts.base64) throw Error(charts.error ?? 'CHART_SOURCE');
+      base64 = charts.base64;
+      await window.electronAPI.notesUpdate(noteId, { file_data: base64 });
+      this.xlsxBase64 = base64;
+      const parsed = await window.electronAPI.xlsxParseData(base64);
+      if (this.noteService.selectedNoteId() === noteId && parsed.success && parsed.sheets) {
+        this.xlsxPivots.set(parsed.pivots ?? []);
+        this.xlsxCharts.set(parsed.charts ?? []);
+        const current = this.xlsxSheets();
+        parsed.sheets.forEach((saved, index) => {
+          if (current[index]) {
+            if ((parsed.pivots ?? []).some((p) => p.targetSheet === saved.name)) {
+              current[index].data = saved.data;
+              current[index].colCount = saved.colCount;
+              current[index].formulas = [];
+            }
+            for (const table of current[index].tables ?? []) {
+              const native = saved.tables?.find((t) => t.name === table.name);
+              if (native && JSON.stringify(native.columns) === JSON.stringify(table.columns)) {
+                table.id = native.id;
+                table.columnIds = native.columnIds;
+                if (native.ref === table.ref && native.totalRows === table.totalRows)
+                  table.totals = native.totals;
+              }
+            }
+            current[index].cellStyles = saved.cellStyles;
+            current[index].formattedCells = saved.formattedCells;
+            current[index].numberFormats = saved.numberFormats;
+          }
+        });
+        for (const [key, format] of formats) {
+          if (JSON.stringify(this.xlsxCellFormats.get(key)) === JSON.stringify(format))
+            this.xlsxCellFormats.delete(key);
+        }
+        this.xlsxSheets.set([...current]);
+      }
+    });
+    this.xlsxSaveQueue = save.catch(() => {});
+    try {
+      await save;
+    } catch (error) {
+      this.xlsxOrigins = origins;
+      this.xlsxError.set('NOTE_EDITOR.XLSX_SAVE_ERROR');
+      console.error(error);
+    } finally {
+      this.xlsxSaving.set(false);
     }
   }
 
+  /** Recibe hojas importadas; reconstruye expresiones y cachés originales para recalcular sin perder resultados no soportados. No retorna valor. */
   private loadXlsxFormulaMetadata(sheets: XlsxSheetView[]): void {
     this.xlsxCellFormulas.clear();
+    this.xlsxImportedFormulaCache.clear();
+    this.xlsxSpills.clear();
+    this.xlsxArrayFormulas.clear();
+    this.xlsxSpillOwners.clear();
     sheets.forEach((sheet, sheetIndex) => {
       for (const formula of sheet.formulas ?? []) {
-        this.xlsxCellFormulas.set(`${sheetIndex}:${formula.row}:${formula.col}`, `=${formula.formula.replace(/^=/, '')}`);
+        if (
+          formula.arrayRange &&
+          (formula.dynamic ||
+            /\b(?:FILTER|SORT|UNIQUE|SEQUENCE|TRANSPOSE)\s*\(/i.test(formula.formula))
+        ) {
+          const parts = formula.arrayRange.split(':').map(spreadsheetAddress),
+            a = parts[0],
+            b = parts[1] ?? a;
+          if (
+            a &&
+            b &&
+            b.row >= a.row &&
+            b.col >= a.col &&
+            (b.row - a.row + 1) * (b.col - a.col + 1) <= 100000
+          )
+            this.xlsxSpills.set(`${sheetIndex}:${formula.row}:${formula.col}`, {
+              sheet: sheetIndex,
+              row: a.row,
+              col: a.col,
+              rows: b.row - a.row + 1,
+              cols: b.col - a.col + 1,
+            });
+        }
+
+        this.xlsxImportedFormulaCache.set(`${sheetIndex}:${formula.row}:${formula.col}`, {
+          formula: canonicalSpreadsheetFormula(formula.formula),
+          value: sheet.data[formula.row]?.[formula.col] ?? null,
+        });
+        this.xlsxCellFormulas.set(
+          `${sheetIndex}:${formula.row}:${formula.col}`,
+          `=${formula.formula.replace(/^=/, '')}`,
+        );
       }
     });
   }
 
-  /** XLSX stores function names in English even when the UI accepts localized aliases. */
+  /** Recibe una expresión localizada; retorna nombres ingleses y separadores OOXML respetando textos y nombres de hojas. */
   private canonicalizeFormula(formula: string): string {
-    const aliases: Record<string, string> = {
-      'SUMA': 'SUM',
-      'PROMEDIO': 'AVERAGE',
-      'CONTAR': 'COUNT',
-      'SI': 'IF',
-      'CONTAR.SI': 'COUNTIF',
-      'SUMAR.SI': 'SUMIF',
-      'REDONDEAR': 'ROUND',
-    };
-    return formula.replace(/\b(SUMAR\.SI|CONTAR\.SI|PROMEDIO|REDONDEAR|CONTAR|SUMA|SI)\s*(?=\()/gi, name => aliases[name.toUpperCase()] ?? name);
+    return canonicalSpreadsheetFormula(formula);
   }
 
-  private activeFormulaCells(): { row: number; col: number; value: XlsxCellValue; formula: string }[] {
+  private activeFormulaCells(): {
+    row: number;
+    col: number;
+    value: XlsxCellValue;
+    formula: string;
+  }[] {
     const sheetIndex = this.activeSheetIndex();
     const prefix = `${sheetIndex}:`;
     const cells: { row: number; col: number; value: XlsxCellValue; formula: string }[] = [];
@@ -1763,62 +3082,578 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       const [, rowText, colText] = key.split(':');
       const row = Number(rowText);
       const col = Number(colText);
-      cells.push({ row, col, value: this.getCellValue(row, col), formula: this.canonicalizeFormula(formula) });
+      cells.push({
+        row,
+        col,
+        value: this.getCellValue(row, col),
+        formula: this.canonicalizeFormula(formula),
+      });
     }
     return cells;
   }
 
+  /** Recalcula el libro por dependencias; no recibe argumentos y publica valores o errores de ciclos. */
   private recalculateXlsxFormulas(): void {
-    const sheet = this.activeSheet;
-    if (!sheet) return;
-    const formulas = this.activeFormulaCells();
-    // A few passes resolve simple chains such as C1 -> B1 -> A1.
-    for (let pass = 0; pass < Math.min(8, Math.max(1, formulas.length)); pass++) {
-      let changed = false;
-      for (const formulaCell of formulas) {
-        const formula = this.xlsxCellFormulas.get(this.getCellFormatKey(formulaCell.row, formulaCell.col));
-        if (!formula) continue;
-        const value = this.evaluateFormula(formula);
-        while (sheet.data.length <= formulaCell.row) sheet.data.push([]);
-        while (sheet.data[formulaCell.row].length <= formulaCell.col) sheet.data[formulaCell.row].push(null);
-        if (sheet.data[formulaCell.row][formulaCell.col] !== value) {
-          sheet.data[formulaCell.row][formulaCell.col] = value;
-          changed = true;
-        }
-      }
-      if (!changed) break;
-    }
+    const result = recalculateSpreadsheetWorkbook(
+      this.xlsxSheets(),
+      this.xlsxCellFormulas,
+      this.xlsxImportedFormulaCache,
+      this.xlsxSpills,
+    );
+    this.xlsxSpills = result.spills;
+    this.xlsxCachedAnchors = result.cachedKeys;
+    this.xlsxArrayFormulas = result.arrays;
+    this.xlsxSpillOwners = result.owners;
+    this.xlsxCachedFormulaCount.set(result.cachedCount);
     this.xlsxSheets.set([...this.xlsxSheets()]);
   }
 
-  private rewriteFormulaReferences(
-    formula: string,
-    mapper: (row: number, col: number) => { row: number; col: number } | null,
-  ): string {
-    return formula.replace(/(\$?)([A-Z]{1,3})(\$?)(\d+)/gi, (_match, colAbsolute: string, colLabel: string, rowAbsolute: string, rowText: string) => {
-      const parsed = this.parseCellRef(`${colLabel}${rowText}`);
-      if (!parsed) return _match;
-      const mapped = mapper(parsed.row, parsed.col);
-      if (!mapped) return '#REF!';
-      return `${colAbsolute}${this.getColumnLabel(mapped.col)}${rowAbsolute}${mapped.row + 1}`;
-    });
+  /** Recibe coordenadas; indica si la celda contiene un resultado derivado protegido de una matriz. */
+  protected isSpillCell(row: number, col: number): boolean {
+    return this.xlsxSpillOwners.has(this.getCellFormatKey(row, col));
   }
 
-  private remapXlsxCellMetadata(mapper: (row: number, col: number) => { row: number; col: number } | null): void {
+  /** Recibe celda de destino; rechaza una edición de resultado derivado sin borrar ni cambiar datos. */
+  private rejectSpillEdit(row: number, col: number): boolean {
+    if (!this.xlsxSpillOwners.has(this.getCellFormatKey(row, col))) return false;
+    this.xlsxError.set('NOTE_EDITOR.SPILL_CHILD');
+    return true;
+  }
+
+  /** No recibe argumentos; retorna true si hay tablas o matrices importadas no recalculables que impedirían un cambio seguro. */
+  private rejectArrayStructure(): boolean {
+    const unsupported = [...this.xlsxSpills.entries()].some(
+      ([key, s]) => s.sheet === this.activeSheetIndex() && this.xlsxCachedAnchors.has(key),
+    );
+    if (!unsupported) return false;
+    this.xlsxError.set('NOTE_EDITOR.SPILL_STRUCTURE');
+    return true;
+  }
+
+  /** No recibe argumentos; indica si la hoja activa contiene tablas, incluso durante la carga inicial. */
+  protected hasXlsxTables(): boolean {
+    return !!this.activeSheet?.tables?.length;
+  }
+
+  /** Recibe creación opcional; abre un borrador de la tabla seleccionada o del rango actual, sin mutar el libro. */
+  protected async openTableResize(create = false): Promise<void> {
+    const noteId = this.noteService.selectedNoteId();
+    if (this.editingCell()) await this.commitCellEdit();
+    await this.xlsxSaveQueue;
+    if (this.editingCell() || noteId !== this.noteService.selectedNoteId()) return;
+    const cell = this.selectedCell(),
+      sheet = this.activeSheet;
+    if (!sheet) return;
+    const table = !create
+      ? sheet.tables?.find((t) => {
+          const b = tableBounds(t.ref);
+          return (
+            cell &&
+            b &&
+            cell.row >= b.a.row &&
+            cell.row <= b.b.row &&
+            cell.col >= b.a.col &&
+            cell.col <= b.b.col
+          );
+        })
+      : undefined;
+    if (!create && !table) {
+      this.xlsxError.set('NOTE_EDITOR.TABLE_SELECT');
+      return;
+    }
+    const r = this.xlsxRange;
+    let name = 'Table1';
+    for (
+      let i = 2;
+      this.xlsxSheets().some((s) =>
+        s.tables?.some((t) => t.name.toLowerCase() === name.toLowerCase()),
+      );
+      i++
+    )
+      name = 'Table' + i;
+    this.tableError.set(null);
+    this.tableDraft.set(
+      table
+        ? {
+            name: table.name,
+            ref: table.ref,
+            source: table.name,
+            totals: !!table.totalRows,
+            aggregates: Object.fromEntries(
+              table.columns.map((c, i) => [c, table.totals?.[i] ?? '']),
+            ),
+          }
+        : {
+            name,
+            ref: r
+              ? this.getColumnLabel(r.startCol) +
+                (r.startRow + 1) +
+                ':' +
+                this.getColumnLabel(r.endCol) +
+                (Math.max(r.startRow + 1, r.endRow) + 1)
+              : 'A1:B2',
+            source: null,
+            totals: false,
+            aggregates: {},
+          },
+    );
+  }
+
+  /** Recibe campo y texto del formulario; actualiza nombre o rango y retorna sin guardar. */
+  protected setTableField(field: 'name' | 'ref', value: string): void {
+    const draft = this.tableDraft();
+    if (draft) this.tableDraft.set({ ...draft, [field]: value });
+    this.tableError.set(null);
+  }
+
+  /** Recibe rango escrito; mantiene la API del campo existente sin guardar datos. */
+  protected setTableRange(ref: string): void {
+    this.setTableField('ref', ref);
+  }
+
+  /** No recibe argumentos; retorna columnas previstas para configurar los totales del borrador. */
+  protected tableDraftColumns(): string[] {
+    const draft = this.tableDraft(),
+      sheet = this.activeSheet,
+      b = draft && tableBounds(draft.ref);
+    if (!draft || !sheet || !b) return [];
+    const old = sheet.tables?.find((t) => t.name === draft.source),
+      columns = old?.columns.slice(0, b.b.col - b.a.col + 1) ?? [];
+    for (let c = b.a.col + columns.length; c <= b.b.col; c++)
+      columns.push(
+        String(sheet.data[b.a.row]?.[c] ?? '').trim() || newTableColumn(columns, c - b.a.col),
+      );
+    return columns;
+  }
+
+  /** Recibe estado de totales; agrega/quita una fila en el rango propuesto y elige suma para columnas numéricas. */
+  protected toggleTableTotals(enabled: boolean): void {
+    const draft = this.tableDraft(),
+      b = draft && tableBounds(draft.ref);
+    if (!draft || !b) return;
+    const aggregates = { ...draft.aggregates },
+      columns = this.tableDraftColumns();
+    if (enabled)
+      columns.forEach((name, i) => {
+        if (
+          !aggregates[name] &&
+          this.activeSheet?.data
+            .slice(b.a.row + 1, b.b.row + 1)
+            .some((r) => typeof r[b.a.col + i] === 'number')
+        )
+          aggregates[name] = 'sum';
+      });
+    this.tableDraft.set({
+      ...draft,
+      totals: enabled,
+      ref:
+        this.getColumnLabel(b.a.col) +
+        (b.a.row + 1) +
+        ':' +
+        this.getColumnLabel(b.b.col) +
+        (b.b.row + 1 + (enabled ? 1 : -1)),
+      aggregates,
+    });
+    this.tableError.set(null);
+  }
+
+  /** Recibe columna y agregación; cambia sólo el borrador, conservando las demás configuraciones. */
+  protected setTableAggregate(column: string, value: string): void {
+    const draft = this.tableDraft();
+    if (draft)
+      this.tableDraft.set({ ...draft, aggregates: { ...draft.aggregates, [column]: value } });
+  }
+
+  /** Recibe nombres anterior/nuevo; actualiza referencias de fórmulas y nombres definidos, preservando literales. null elimina la tabla referida. */
+  private renameXlsxTable(previous: string, next: string | null): void {
+    for (const [key, formula] of this.xlsxCellFormulas)
+      this.xlsxCellFormulas.set(key, renameSpreadsheetTableReferences(formula, previous, next));
+    for (const [key, cache] of this.xlsxImportedFormulaCache)
+      this.xlsxImportedFormulaCache.set(key, {
+        ...cache,
+        formula: renameSpreadsheetTableReferences(cache.formula, previous, next),
+      });
+    for (const sheet of this.xlsxSheets())
+      if (sheet.definedNames)
+        for (const name of Object.keys(sheet.definedNames))
+          sheet.definedNames[name] = renameSpreadsheetTableReferences(
+            sheet.definedNames[name],
+            previous,
+            next,
+          );
+  }
+
+  /** Valida nombre/rango/totales, conserva datos externos y guarda una tabla nueva o existente; no recibe argumentos. */
+  protected async saveTableResize(): Promise<void> {
+    const draft = this.tableDraft(),
+      sheet = this.activeSheet;
+    if (!draft || !sheet || this.xlsxSaving()) return;
+    const original = sheet.tables?.find((t) => t.name === draft.source),
+      allTables = this.xlsxSheets().flatMap((s) => s.tables ?? []);
+    try {
+      const name = validateTableName(
+          draft.name,
+          allTables,
+          original?.name,
+          this.xlsxSheets().flatMap((s) => Object.keys(s.definedNames ?? {})),
+        ),
+        b = tableBounds(draft.ref);
+      if (!b) throw Error('NOTE_EDITOR.TABLE_RANGE_ERROR');
+      const basis: SpreadsheetTable = original ?? {
+        name,
+        sheet: sheet.name,
+        ref: draft.ref,
+        columns: this.tableDraftColumns(),
+        headerRows: 1,
+        totalRows: 0,
+      };
+      const table = resizeSpreadsheetTable(
+        { ...basis, totalRows: draft.totals ? 1 : 0 },
+        draft.ref,
+        sheet.data,
+        sheet.tables ?? [],
+      );
+      table.name = name;
+      table.id = original?.id ?? Math.max(0, ...allTables.map((t) => t.id ?? 0)) + 1;
+      let nextColumnId =
+        Math.max(0, ...(original?.columnIds ?? original?.columns.map((_, i) => i + 1) ?? [])) + 1;
+      table.columnIds = table.columns.map(
+        (_, i) =>
+          original?.columnIds?.[i] ??
+          (original && i < original.columns.length ? i + 1 : nextColumnId++),
+      );
+      table.sourceName = original?.sourceName ?? original?.name;
+      table.totals = table.columns.map((c) => draft.aggregates[c] ?? '');
+      if (table.totals.some((v) => !TABLE_TOTAL_FUNCTIONS.includes(v) && v !== 'custom'))
+        throw Error('NOTE_EDITOR.TABLE_RANGE_ERROR');
+      if (
+        new Set(table.columns.map((c) => c.toLowerCase())).size !== table.columns.length ||
+        table.columns.some((c) => !c || c.length > 255) ||
+        table.columns.length !== b.b.col - b.a.col + 1
+      )
+        throw Error('NOTE_EDITOR.TABLE_HEADER_ERROR');
+      const old = original && tableBounds(original.ref),
+        oldTotalRow = original?.totalRows ? old!.b.row : -1;
+      for (let col = b.a.col; col <= b.b.col; col++) {
+        if (table.headerRows && this.xlsxCellFormulas.has(this.getCellFormatKey(b.a.row, col)))
+          throw Error('NOTE_EDITOR.TABLE_HEADER_ERROR');
+        if (
+          draft.totals &&
+          (b.b.row !== oldTotalRow || !old || col > old.b.col) &&
+          ((sheet.data[b.b.row]?.[col] != null && sheet.data[b.b.row]?.[col] !== '') ||
+            this.xlsxCellFormulas.has(this.getCellFormatKey(b.b.row, col)))
+        )
+          throw Error('NOTE_EDITOR.TABLE_TOTAL_OCCUPIED');
+      }
+      if (
+        (sheet.merges ?? []).some(
+          (m) => m.s.r <= b.b.row && m.e.r >= b.a.row && m.s.c <= b.b.col && m.e.c >= b.a.col,
+        ) ||
+        [...this.xlsxArrayFormulas.values()].some(
+          (s) =>
+            s.sheet === this.activeSheetIndex() &&
+            s.row <= b.b.row &&
+            s.row + s.rows - 1 >= b.a.row &&
+            s.col <= b.b.col &&
+            s.col + s.cols - 1 >= b.a.col,
+        )
+      )
+        throw Error('NOTE_EDITOR.TABLE_OVERLAP');
+      this.pushUndoSnapshot();
+      const custom = original?.columns.map((c, i) => ({
+        name: c,
+        value: sheet.data[oldTotalRow]?.[old!.a.col + i] ?? null,
+        formula: this.xlsxCellFormulas.get(this.getCellFormatKey(oldTotalRow, old!.a.col + i)),
+      }));
+      if (oldTotalRow >= 0 && (!table.totalRows || oldTotalRow !== b.b.row))
+        for (let col = old!.a.col; col <= old!.b.col; col++) {
+          sheet.data[oldTotalRow][col] = null;
+          this.xlsxCellFormulas.delete(this.getCellFormatKey(oldTotalRow, col));
+        }
+      while (sheet.data.length <= b.b.row) sheet.data.push([]);
+      if (original && original.name !== name) this.renameXlsxTable(original.name, name);
+      sheet.tables = [...(sheet.tables ?? []).filter((t) => t.name !== original?.name), table];
+      sheet.colCount = Math.max(sheet.colCount, b.b.col + 1);
+      if (table.totalRows)
+        table.columns.forEach((column, i) => {
+          if (table.totals?.[i] === 'custom') {
+            const cell = custom?.find((c) => c.name === column);
+            if (cell) {
+              sheet.data[b.b.row][b.a.col + i] = cell.value;
+              if (cell.formula)
+                this.xlsxCellFormulas.set(
+                  this.getCellFormatKey(b.b.row, b.a.col + i),
+                  renameSpreadsheetTableReferences(
+                    translateSpreadsheetFormula(cell.formula, b.b.row - oldTotalRow, 0),
+                    original!.name,
+                    name,
+                  ),
+                );
+            }
+          }
+        });
+      this.pendingTableStructure = true;
+      this.synchronizeXlsxTables();
+      this.xlsxSheets.set([...this.xlsxSheets()]);
+      this.tableDraft.set(null);
+      await this.persistXlsxData();
+    } catch (error) {
+      this.tableError.set(error instanceof Error ? error.message : 'NOTE_EDITOR.TABLE_RANGE_ERROR');
+    }
+  }
+
+  /** No recibe argumentos; después de un cambio de tabla actualiza encabezados, columnas calculadas vacías y totales sin sobrescribir datos ordinarios. */
+  private synchronizeXlsxTables(): void {
+    if (!this.pendingTableStructure) return;
+    const sheet = this.activeSheet;
+    if (!sheet) return;
+    for (const table of sheet.tables ?? []) {
+      table.calculated = {};
+      const b = tableBounds(table.ref)!;
+      while (sheet.data.length <= b.b.row) sheet.data.push([]);
+      if (table.headerRows)
+        table.columns.forEach((name, i) => (sheet.data[b.a.row][b.a.col + i] = name));
+      const first = b.a.row + table.headerRows,
+        last = b.b.row - table.totalRows;
+      for (let col = b.a.col; col <= b.b.col; col++) {
+        let sample = -1;
+        for (let row = first; row <= last; row++)
+          if (this.xlsxCellFormulas.has(this.getCellFormatKey(row, col))) {
+            sample = row;
+            break;
+          }
+        if (sample >= 0)
+          table.calculated[table.columns[col - b.a.col]] = ooxmlSpreadsheetFormula(
+            this.xlsxCellFormulas.get(this.getCellFormatKey(sample, col))!,
+          );
+        if (sample >= 0)
+          for (let row = first; row <= last; row++)
+            if (
+              !this.xlsxCellFormulas.has(this.getCellFormatKey(row, col)) &&
+              (sheet.data[row]?.[col] == null || sheet.data[row]?.[col] === '')
+            )
+              this.xlsxCellFormulas.set(
+                this.getCellFormatKey(row, col),
+                translateSpreadsheetFormula(
+                  this.xlsxCellFormulas.get(this.getCellFormatKey(sample, col))!,
+                  row - sample,
+                  0,
+                ),
+              );
+        if (table.totalRows) {
+          const kind = table.totals?.[col - b.a.col] ?? '',
+            formula = tableTotalFormula(
+              kind,
+              this.getColumnLabel(col) + (first + 1) + ':' + this.getColumnLabel(col) + (last + 1),
+            );
+          if (formula) this.xlsxCellFormulas.set(this.getCellFormatKey(b.b.row, col), formula);
+          else if (kind !== 'custom') {
+            this.xlsxCellFormulas.delete(this.getCellFormatKey(b.b.row, col));
+            sheet.data[b.b.row][col] = col === b.a.col ? 'Total' : null;
+          }
+        }
+      }
+    }
+    this.pendingTableStructure = false;
+  }
+
+  /** Valida encabezados editados y renombra referencias estructuradas simultáneamente; no recibe argumentos y retorna false sin guardar encabezados con fórmulas. */
+  private synchronizeXlsxHeaders(): boolean {
+    const sheet = this.activeSheet;
+    if (!sheet) return true;
+    const changes: { table: SpreadsheetTable; columns: string[]; names: Record<string, string> }[] =
+      [];
+    for (const table of sheet.tables ?? []) {
+      if (!table.headerRows) continue;
+      const b = tableBounds(table.ref)!,
+        columns: string[] = [],
+        names: Record<string, string> = {};
+      for (let col = b.a.col; col <= b.b.col; col++) {
+        if (this.xlsxCellFormulas.has(this.getCellFormatKey(b.a.row, col))) {
+          this.xlsxError.set('NOTE_EDITOR.TABLE_HEADER_ERROR');
+          return false;
+        }
+        let name = String(sheet.data[b.a.row]?.[col] ?? '').trim();
+        if (!name || columns.some((c) => c.toLowerCase() === name.toLowerCase()))
+          name = newTableColumn([...table.columns, ...columns], col - b.a.col);
+        if (name.length > 255) {
+          this.xlsxError.set('NOTE_EDITOR.TABLE_HEADER_ERROR');
+          return false;
+        }
+        columns.push(name);
+        if (name !== table.columns[col - b.a.col]) names[table.columns[col - b.a.col]] = name;
+      }
+      if (Object.keys(names).length) changes.push({ table, columns, names });
+    }
+    for (const { table, columns, names } of changes) {
+      const b = tableBounds(table.ref)!,
+        oldColumns = table.columns;
+      const implicit = (key: string) => {
+        const [owner, row, col] = key.split(':').map(Number);
+        return (
+          owner === this.activeSheetIndex() &&
+          row > b.a.row &&
+          row <= b.b.row - table.totalRows &&
+          col >= b.a.col &&
+          col <= b.b.col
+        );
+      };
+      for (const [key, formula] of this.xlsxCellFormulas)
+        this.xlsxCellFormulas.set(
+          key,
+          renameSpreadsheetColumnReferences(formula, table.name, names, implicit(key)),
+        );
+      for (const [key, cache] of this.xlsxImportedFormulaCache)
+        this.xlsxImportedFormulaCache.set(key, {
+          ...cache,
+          formula: renameSpreadsheetColumnReferences(
+            cache.formula,
+            table.name,
+            names,
+            implicit(key),
+          ),
+        });
+      for (const owner of this.xlsxSheets())
+        if (owner.definedNames)
+          for (const name of Object.keys(owner.definedNames))
+            owner.definedNames[name] = renameSpreadsheetColumnReferences(
+              owner.definedNames[name],
+              table.name,
+              names,
+            );
+      table.columnSources = Object.fromEntries(
+        columns.map((name, i) => [name, table.columnSources?.[oldColumns[i]] ?? oldColumns[i]]),
+      );
+      table.columns = columns;
+      columns.forEach((name, i) => (sheet.data[b.a.row][b.a.col + i] = name));
+    }
+    return true;
+  }
+
+  /** Recibe transformación estructural; remapea fórmulas/formatos y limpia sólo resultados derivados antes de mover los datos. No retorna valor. */
+  private remapXlsxCellMetadata(mapper: CellMapper, allowGaps = false): boolean {
+    const activeSheet = this.activeSheet;
+    const previousTables = activeSheet?.tables ?? [];
+    let tables: SpreadsheetTable[];
+    try {
+      tables = previousTables.flatMap((table) => {
+        const mapped = remapSpreadsheetTable(table, mapper, allowGaps);
+        return mapped ? [mapped] : [];
+      });
+    } catch (error) {
+      this.xlsxError.set(
+        error instanceof Error ? error.message : 'NOTE_EDITOR.TABLE_STRUCTURE_ERROR',
+      );
+      return false;
+    }
+    if (activeSheet) {
+      activeSheet.tables = tables;
+      activeSheet.hiddenRows = activeSheet.hiddenRows?.flatMap((row) => {
+        const next = mapper(row, 16384);
+        return next ? [next.row] : [];
+      });
+    }
+    for (const previous of previousTables)
+      if (!tables.some((t) => t.name === previous.name)) this.renameXlsxTable(previous.name, null);
+    this.pendingTableStructure = true;
+    for (const sheet of this.xlsxSheets()) {
+      if (sheet.definedNames)
+        sheet.definedNames = Object.fromEntries(
+          Object.entries(sheet.definedNames).map(([name, ref]) => [
+            name,
+            remapSpreadsheetFormula(ref, sheet.name, activeSheet!.name, mapper),
+          ]),
+        );
+    }
+    // Regenerar las matrices desde sus anclas evita limpiar posiciones antiguas que ya contienen otros datos.
+    for (const [key, spill] of this.xlsxSpills) {
+      if (spill.sheet !== this.activeSheetIndex()) continue;
+      for (const cell of spreadsheetSpillCells(spill)) {
+        if (activeSheet?.data[cell.row]) activeSheet.data[cell.row][cell.col] = null;
+      }
+      this.xlsxSpills.delete(key);
+    }
+    for (const [key, spill] of this.xlsxArrayFormulas)
+      if (spill.sheet === this.activeSheetIndex()) this.xlsxArrayFormulas.delete(key);
+    for (const key of this.xlsxSpillOwners.keys())
+      if (key.startsWith(this.activeSheetIndex() + ':')) this.xlsxSpillOwners.delete(key);
+    if (activeSheet) {
+      const origins: Record<string, string> = {};
+      const keys = new Set(Object.keys(activeSheet.cellStyles ?? {}));
+      activeSheet.data.forEach((row, r) => row.forEach((_, c) => keys.add(`${r}:${c}`)));
+      for (const key of keys) {
+        const [row, col] = key.split(':').map(Number),
+          next = mapper(row, col);
+        if (next)
+          origins[`${this.getColumnLabel(next.col)}${next.row + 1}`] =
+            this.xlsxOrigins?.[`${this.getColumnLabel(col)}${row + 1}`] ??
+            `${this.getColumnLabel(col)}${row + 1}`;
+      }
+      this.xlsxOrigins = origins;
+      for (const field of ['cellStyles', 'formattedCells'] as const) {
+        const mapped: Record<
+          string,
+          Record<string, string> | { value: XlsxCellValue; text: string }
+        > = {};
+        for (const [key, value] of Object.entries(activeSheet[field] ?? {})) {
+          const [row, col] = key.split(':').map(Number),
+            next = mapper(row, col);
+          if (next) mapped[`${next.row}:${next.col}`] = value;
+        }
+        if (field === 'cellStyles')
+          activeSheet.cellStyles = mapped as NonNullable<XlsxSheetView['cellStyles']>;
+        else activeSheet.formattedCells = mapped as NonNullable<XlsxSheetView['formattedCells']>;
+      }
+      const numbers: Record<string, string> = {};
+      for (const [key, format] of Object.entries(activeSheet.numberFormats ?? {})) {
+        const [row, col] = key.split(':').map(Number),
+          next = mapper(row, col);
+        if (next) numbers[`${next.row}:${next.col}`] = format;
+      }
+      activeSheet.numberFormats = numbers;
+    }
     const sheetIndex = this.activeSheetIndex();
     const remappedFormulas = new Map<string, string>();
     for (const [key, formula] of this.xlsxCellFormulas) {
       const [sheetText, rowText, colText] = key.split(':');
       if (Number(sheetText) !== sheetIndex) {
-        remappedFormulas.set(key, formula);
+        remappedFormulas.set(
+          key,
+          remapSpreadsheetFormula(
+            formula,
+            this.xlsxSheets()[Number(sheetText)].name,
+            this.activeSheet!.name,
+            mapper,
+          ),
+        );
         continue;
       }
       const mapped = mapper(Number(rowText), Number(colText));
-      if (mapped) remappedFormulas.set(`${sheetIndex}:${mapped.row}:${mapped.col}`, this.rewriteFormulaReferences(formula, mapper));
+      if (mapped)
+        remappedFormulas.set(
+          `${sheetIndex}:${mapped.row}:${mapped.col}`,
+          remapSpreadsheetFormula(formula, this.activeSheet!.name, this.activeSheet!.name, mapper),
+        );
     }
+    const remappedCaches = new Map<string, { formula: string; value: XlsxCellValue }>();
+    for (const [key, cached] of this.xlsxImportedFormulaCache) {
+      const [owner, row, col] = key.split(':').map(Number);
+      const next = owner === sheetIndex ? mapper(row, col) : { row, col };
+      if (!next) continue;
+      remappedCaches.set(`${owner}:${next.row}:${next.col}`, {
+        value: cached.value,
+        formula: remapSpreadsheetFormula(
+          cached.formula,
+          this.xlsxSheets()[owner].name,
+          this.activeSheet!.name,
+          mapper,
+        ),
+      });
+    }
+    this.xlsxImportedFormulaCache = remappedCaches;
     this.xlsxCellFormulas = remappedFormulas;
 
-    const remappedFormats = new Map<string, { bold?: boolean; italic?: boolean; underline?: boolean; align?: 'left' | 'center' | 'right'; fontSize?: number }>();
+    const remappedFormats = new Map<string, SpreadsheetFormat>();
     for (const [key, format] of this.xlsxCellFormats) {
       const [sheetText, rowText, colText] = key.split(':');
       if (Number(sheetText) !== sheetIndex) {
@@ -1832,19 +3667,176 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
     const sheet = this.activeSheet;
     if (sheet?.merges) {
-      sheet.merges = sheet.merges.flatMap(merge => {
-        const start = mapper(merge.s.r, merge.s.c);
-        const end = mapper(merge.e.r, merge.e.c);
+      sheet.merges = sheet.merges.flatMap((merge) => {
+        let start = mapper(merge.s.r, merge.s.c);
+        let end = mapper(merge.e.r, merge.e.c);
+        // Si se elimina un borde, conservar la parte superviviente de la combinación.
+        if (!start) {
+          search: for (let row = merge.s.r; row <= merge.e.r; row++)
+            for (let col = merge.s.c; col <= merge.e.c; col++) {
+              start = mapper(row, col);
+              if (start) break search;
+            }
+        }
+        if (!end) {
+          search: for (let row = merge.e.r; row >= merge.s.r; row--)
+            for (let col = merge.e.c; col >= merge.s.c; col--) {
+              end = mapper(row, col);
+              if (end) break search;
+            }
+        }
         if (!start || !end) return [];
-        return [{
-          s: { r: Math.min(start.row, end.row), c: Math.min(start.col, end.col) },
-          e: { r: Math.max(start.row, end.row), c: Math.max(start.col, end.col) },
-        }];
+        if (start.row === end.row && start.col === end.col) return [];
+        return [
+          {
+            s: { r: Math.min(start.row, end.row), c: Math.min(start.col, end.col) },
+            e: { r: Math.max(start.row, end.row), c: Math.max(start.col, end.col) },
+          },
+        ];
       });
     }
+    return true;
   }
 
   // ── Context menu ──
+
+  /** Combina el rango seleccionado; recibe centrado opcional y retorna al guardar sin borrar valores ocultos. */
+  protected async xlsxMerge(center = false): Promise<void> {
+    if (this.activePivot()) return;
+    const r = this.xlsxRange,
+      sheet = this.activeSheet;
+    if (!r || !sheet) return;
+    if (r.startRow === r.endRow && r.startCol === r.endCol) return;
+    const intersects = (m: NonNullable<XlsxSheetView['merges']>[number]) =>
+      m.s.r <= r.endRow && m.e.r >= r.startRow && m.s.c <= r.endCol && m.e.c >= r.startCol;
+    if (
+      sheet.merges?.some(
+        (m) =>
+          intersects(m) &&
+          (m.s.r < r.startRow || m.s.c < r.startCol || m.e.r > r.endRow || m.e.c > r.endCol),
+      )
+    ) {
+      this.xlsxError.set('NOTE_EDITOR.XLSX_MERGE_PARTIAL');
+      return;
+    }
+    // Los valores cubiertos se conservan y reaparecen al separar; no destruir datos silenciosamente.
+    this.pushUndoSnapshot();
+    sheet.merges = [
+      ...(sheet.merges ?? []).filter((m) => !intersects(m)),
+      { s: { r: r.startRow, c: r.startCol }, e: { r: r.endRow, c: r.endCol } },
+    ];
+    if (center)
+      this.xlsxCellFormats.set(this.getCellFormatKey(r.startRow, r.startCol), {
+        ...this.getCellFormat(r.startRow, r.startCol),
+        align: 'center',
+      });
+    this.selectCell(r.startRow, r.startCol);
+    this.xlsxSheets.set([...this.xlsxSheets()]);
+    await this.persistXlsxData();
+  }
+
+  /** Separa las combinaciones que intersectan la selección; no recibe argumentos y guarda sus celdas originales. */
+  protected async xlsxUnmerge(): Promise<void> {
+    if (this.activePivot()) return;
+    const r = this.xlsxRange,
+      sheet = this.activeSheet;
+    if (!r || !sheet) return;
+    this.pushUndoSnapshot();
+    sheet.merges = (sheet.merges ?? []).filter(
+      (m) => m.e.r < r.startRow || m.s.r > r.endRow || m.e.c < r.startCol || m.s.c > r.endCol,
+    );
+    this.xlsxSheets.set([...this.xlsxSheets()]);
+    await this.persistXlsxData();
+  }
+
+  /** Aplica una propiedad de formato al rango; recibe nombre/valor y retorna sin esperar al guardado serializado. */
+  protected formatXlsx(prop: keyof SpreadsheetFormat, value: unknown): void {
+    this.applyFormatToRange(prop, value);
+  }
+
+  /** Ordena filas completas por la columna activa; recibe dirección y retorna tras guardar fórmulas/estilos. */
+  protected async xlsxSort(descending = false): Promise<void> {
+    if (this.rejectArrayStructure()) return;
+    if (this.activePivot()) return;
+    const r = this.xlsxRange,
+      sheet = this.activeSheet;
+    if (!r || !sheet) return;
+    const table = sheet.tables?.find((t) => {
+      const b = tableBounds(t.ref)!;
+      return (
+        r.startRow >= b.a.row &&
+        r.startRow <= b.b.row &&
+        r.startCol >= b.a.col &&
+        r.startCol <= b.b.col
+      );
+    });
+    const bounds = table && tableBounds(table.ref)!;
+    const start = bounds
+        ? r.endRow === r.startRow
+          ? bounds.a.row + table!.headerRows
+          : Math.max(r.startRow, bounds.a.row + table!.headerRows)
+        : r.startRow,
+      end = bounds
+        ? r.endRow > r.startRow
+          ? Math.min(r.endRow, bounds.b.row - table!.totalRows)
+          : bounds.b.row - table!.totalRows
+        : r.endRow > start
+          ? r.endRow
+          : sheet.data.length - 1;
+    if (end < start) return;
+    if (
+      [...this.xlsxSpills.values()].some(
+        (s) =>
+          s.sheet === this.activeSheetIndex() &&
+          s.row <= end &&
+          s.row + s.rows - 1 >= start &&
+          (!bounds || (s.col <= bounds.b.col && s.col + s.cols - 1 >= bounds.a.col)),
+      )
+    ) {
+      this.xlsxError.set('NOTE_EDITOR.SPILL_SORT');
+      return;
+    }
+    if ((sheet.merges ?? []).some((m) => m.s.r <= end && m.e.r >= start)) {
+      this.xlsxError.set('NOTE_EDITOR.XLSX_SORT_MERGED');
+      return;
+    }
+    this.pushUndoSnapshot();
+    const col = this.selectedCell()?.col ?? r.startCol;
+    const rows = Array.from({ length: end - start + 1 }, (_, i) => start + i).sort((a, b) => {
+      const x = sheet.data[a]?.[col],
+        y = sheet.data[b]?.[col];
+      if (x == null || x === '') return y == null || y === '' ? 0 : 1;
+      if (y == null || y === '') return -1;
+      const compared =
+        typeof x === 'number' && typeof y === 'number'
+          ? x - y
+          : String(x).localeCompare(String(y), undefined, { numeric: true });
+      return descending ? -compared : compared;
+    });
+    const mapping = new Map(rows.map((old, index) => [old, start + index]));
+    const data = rows.map((row) => [...sheet.data[row]]);
+    if (
+      !this.remapXlsxCellMetadata((row, col) => ({
+        row:
+          !bounds || (col >= bounds.a.col && col <= bounds.b.col) ? (mapping.get(row) ?? row) : row,
+        col,
+      }))
+    )
+      return;
+    if (bounds)
+      data.forEach((values, i) => {
+        for (let col = bounds.a.col; col <= bounds.b.col; col++)
+          sheet.data[start + i][col] = values[col] ?? null;
+      });
+    else sheet.data.splice(start, end - start + 1, ...data);
+    this.xlsxSheets.set([...this.xlsxSheets()]);
+    await this.persistXlsxData();
+  }
+
+  /** Reintenta guardar el estado visible; no recibe argumentos ni descarta las ediciones ante fallos. */
+  protected retryXlsxSave(): void {
+    void this.persistXlsxData();
+  }
 
   protected onXlsxContextMenu(event: MouseEvent, row: number, col: number): void {
     event.preventDefault();
@@ -1868,24 +3860,54 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   protected async onContextMenuAction(action: string): Promise<void> {
     this.xlsxContextMenu.set(null);
     switch (action) {
-      case 'copy': this.xlsxCopy(); break;
-      case 'cut': this.xlsxCut(); break;
-      case 'paste': await this.xlsxPaste(); break;
-      case 'delete': await this.xlsxDeleteSelection(); break;
-      case 'insertRowAbove': await this.xlsxInsertRow(false); break;
-      case 'insertRowBelow': await this.xlsxInsertRow(true); break;
-      case 'insertColLeft': await this.xlsxInsertCol(false); break;
-      case 'insertColRight': await this.xlsxInsertCol(true); break;
-      case 'deleteRow': await this.xlsxDeleteRow(); break;
-      case 'deleteCol': await this.xlsxDeleteCol(); break;
-      case 'moveRowUp': await this.xlsxMoveRows(-1); break;
-      case 'moveRowDown': await this.xlsxMoveRows(1); break;
-      case 'moveColLeft': await this.xlsxMoveCols(-1); break;
-      case 'moveColRight': await this.xlsxMoveCols(1); break;
+      case 'copy':
+        this.xlsxCopy();
+        break;
+      case 'cut':
+        this.xlsxCut();
+        break;
+      case 'paste':
+        await this.xlsxPaste();
+        break;
+      case 'delete':
+        await this.xlsxDeleteSelection();
+        break;
+      case 'insertRowAbove':
+        await this.xlsxInsertRow(false);
+        break;
+      case 'insertRowBelow':
+        await this.xlsxInsertRow(true);
+        break;
+      case 'insertColLeft':
+        await this.xlsxInsertCol(false);
+        break;
+      case 'insertColRight':
+        await this.xlsxInsertCol(true);
+        break;
+      case 'deleteRow':
+        await this.xlsxDeleteRow();
+        break;
+      case 'deleteCol':
+        await this.xlsxDeleteCol();
+        break;
+      case 'moveRowUp':
+        await this.xlsxMoveRows(-1);
+        break;
+      case 'moveRowDown':
+        await this.xlsxMoveRows(1);
+        break;
+      case 'moveColLeft':
+        await this.xlsxMoveCols(-1);
+        break;
+      case 'moveColRight':
+        await this.xlsxMoveCols(1);
+        break;
     }
   }
 
   protected async xlsxInsertRow(below: boolean): Promise<void> {
+    if (this.rejectArrayStructure()) return;
+    if (this.activePivot()) return;
     const r = this.xlsxRange;
     if (!r) return;
     this.pushUndoSnapshot();
@@ -1893,14 +3915,27 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     const sheet = sheets[this.activeSheetIndex()];
     if (!sheet) return;
     const insertAt = below ? r.endRow + 1 : r.startRow;
-    this.remapXlsxCellMetadata((row, col) => ({ row: row >= insertAt ? row + 1 : row, col }));
+    const count = r.endRow - r.startRow + 1;
+    while (sheet.data.length < insertAt) sheet.data.push([]);
+    sheet.rowHeights ??= [];
+    while (sheet.rowHeights.length < insertAt) sheet.rowHeights.push(20);
+    if (
+      !this.remapXlsxCellMetadata(
+        (row, col) => ({ row: row >= insertAt ? row + count : row, col }),
+        true,
+      )
+    )
+      return;
+    sheet.rowHeights.splice(insertAt, 0, ...Array(count).fill(20));
     const emptyRow: (string | number | boolean | null)[] = new Array(sheet.colCount).fill(null);
-    sheet.data.splice(insertAt, 0, emptyRow);
+    sheet.data.splice(insertAt, 0, ...Array.from({ length: count }, () => [...emptyRow]));
     this.xlsxSheets.set([...sheets]);
     await this.persistXlsxData();
   }
 
   protected async xlsxInsertCol(right: boolean): Promise<void> {
+    if (this.rejectArrayStructure()) return;
+    if (this.activePivot()) return;
     const r = this.xlsxRange;
     if (!r) return;
     this.pushUndoSnapshot();
@@ -1908,16 +3943,29 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     const sheet = sheets[this.activeSheetIndex()];
     if (!sheet) return;
     const insertAt = right ? r.endCol + 1 : r.startCol;
-    this.remapXlsxCellMetadata((row, col) => ({ row, col: col >= insertAt ? col + 1 : col }));
+    const count = r.endCol - r.startCol + 1;
+    sheet.colWidths ??= [];
+    while (sheet.colWidths.length < insertAt) sheet.colWidths.push(80);
+    if (
+      !this.remapXlsxCellMetadata(
+        (row, col) => ({ row, col: col >= insertAt ? col + count : col }),
+        true,
+      )
+    )
+      return;
+    sheet.colWidths.splice(insertAt, 0, ...Array(count).fill(80));
     for (const row of sheet.data) {
-      row.splice(insertAt, 0, null);
+      while (row.length < insertAt) row.push(null);
+      row.splice(insertAt, 0, ...Array(count).fill(null));
     }
-    sheet.colCount++;
+    sheet.colCount = Math.max(sheet.colCount, insertAt) + count;
     this.xlsxSheets.set([...sheets]);
     await this.persistXlsxData();
   }
 
   protected async xlsxDeleteRow(): Promise<void> {
+    if (this.rejectArrayStructure()) return;
+    if (this.activePivot()) return;
     const r = this.xlsxRange;
     if (!r) return;
     this.pushUndoSnapshot();
@@ -1925,11 +3973,15 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     const sheet = sheets[this.activeSheetIndex()];
     if (!sheet) return;
     const count = r.endRow - r.startRow + 1;
-    this.remapXlsxCellMetadata((row, col) => {
-      if (row >= r.startRow && row <= r.endRow) return null;
-      return { row: row > r.endRow ? row - count : row, col };
-    });
+    if (
+      !this.remapXlsxCellMetadata((row, col) => {
+        if (row >= r.startRow && row <= r.endRow) return null;
+        return { row: row > r.endRow ? row - count : row, col };
+      })
+    )
+      return;
     sheet.data.splice(r.startRow, count);
+    sheet.rowHeights?.splice(r.startRow, count);
     this.xlsxSheets.set([...sheets]);
     this.selectedCell.set(null);
     this.xlsxSelectionStart.set(null);
@@ -1938,6 +3990,8 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   }
 
   protected async xlsxDeleteCol(): Promise<void> {
+    if (this.rejectArrayStructure()) return;
+    if (this.activePivot()) return;
     const r = this.xlsxRange;
     if (!r) return;
     this.pushUndoSnapshot();
@@ -1945,14 +3999,18 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     const sheet = sheets[this.activeSheetIndex()];
     if (!sheet) return;
     const count = r.endCol - r.startCol + 1;
-    this.remapXlsxCellMetadata((row, col) => {
-      if (col >= r.startCol && col <= r.endCol) return null;
-      return { row, col: col > r.endCol ? col - count : col };
-    });
+    if (
+      !this.remapXlsxCellMetadata((row, col) => {
+        if (col >= r.startCol && col <= r.endCol) return null;
+        return { row, col: col > r.endCol ? col - count : col };
+      })
+    )
+      return;
     for (const row of sheet.data) {
       row.splice(r.startCol, count);
     }
     sheet.colCount = Math.max(0, sheet.colCount - count);
+    sheet.colWidths?.splice(r.startCol, count);
     this.xlsxSheets.set([...sheets]);
     this.selectedCell.set(null);
     this.xlsxSelectionStart.set(null);
@@ -1961,12 +4019,18 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   }
 
   protected async xlsxMoveRows(direction: -1 | 1): Promise<void> {
+    if (this.rejectArrayStructure()) return;
+    if (this.activePivot()) return;
     if (!this.xlsxSelectingFullRows()) return;
     const range = this.xlsxRange;
     const sheet = this.activeSheet;
     if (!range || !sheet) return;
     const count = range.endRow - range.startRow + 1;
-    if ((direction < 0 && range.startRow === 0) || (direction > 0 && range.endRow >= this.displayRowCount - 1)) return;
+    if (
+      (direction < 0 && range.startRow === 0) ||
+      (direction > 0 && range.endRow >= this.displayRowCount - 1)
+    )
+      return;
     this.pushUndoSnapshot();
 
     while (sheet.data.length <= range.endRow + (direction > 0 ? 1 : 0)) {
@@ -1974,14 +4038,22 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     }
 
     const adjacentRow = direction < 0 ? range.startRow - 1 : range.endRow + 1;
-    this.remapXlsxCellMetadata((row, col) => {
-      if (row >= range.startRow && row <= range.endRow) return { row: row + direction, col };
-      if (row === adjacentRow) return { row: direction < 0 ? range.endRow : range.startRow, col };
-      return { row, col };
-    });
+    if (
+      !this.remapXlsxCellMetadata((row, col) => {
+        if (row >= range.startRow && row <= range.endRow) return { row: row + direction, col };
+        if (row === adjacentRow) return { row: direction < 0 ? range.endRow : range.startRow, col };
+        return { row, col };
+      })
+    )
+      return;
 
     const moved = sheet.data.splice(range.startRow, count);
     sheet.data.splice(range.startRow + direction, 0, ...moved);
+    if (sheet.rowHeights) {
+      while (sheet.rowHeights.length < sheet.data.length) sheet.rowHeights.push(20);
+      const heights = sheet.rowHeights.splice(range.startRow, count);
+      sheet.rowHeights.splice(range.startRow + direction, 0, ...heights);
+    }
     const nextStart = range.startRow + direction;
     const nextEnd = range.endRow + direction;
     this.selectedCell.set({ row: nextStart, col: this.selectedCell()?.col ?? 0 });
@@ -1992,27 +4064,41 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   }
 
   protected async xlsxMoveCols(direction: -1 | 1): Promise<void> {
+    if (this.rejectArrayStructure()) return;
+    if (this.activePivot()) return;
     if (!this.xlsxSelectingFullCols()) return;
     const range = this.xlsxRange;
     const sheet = this.activeSheet;
     if (!range || !sheet) return;
     const count = range.endCol - range.startCol + 1;
-    if ((direction < 0 && range.startCol === 0) || (direction > 0 && range.endCol >= this.displayColCount - 1)) return;
+    if (
+      (direction < 0 && range.startCol === 0) ||
+      (direction > 0 && range.endCol >= this.displayColCount - 1)
+    )
+      return;
     this.pushUndoSnapshot();
 
     sheet.colCount = Math.max(sheet.colCount, range.endCol + (direction > 0 ? 2 : 1));
 
     const adjacentCol = direction < 0 ? range.startCol - 1 : range.endCol + 1;
-    this.remapXlsxCellMetadata((row, col) => {
-      if (col >= range.startCol && col <= range.endCol) return { row, col: col + direction };
-      if (col === adjacentCol) return { row, col: direction < 0 ? range.endCol : range.startCol };
-      return { row, col };
-    });
+    if (
+      !this.remapXlsxCellMetadata((row, col) => {
+        if (col >= range.startCol && col <= range.endCol) return { row, col: col + direction };
+        if (col === adjacentCol) return { row, col: direction < 0 ? range.endCol : range.startCol };
+        return { row, col };
+      })
+    )
+      return;
 
     for (const row of sheet.data) {
       while (row.length < sheet.colCount) row.push(null);
       const moved = row.splice(range.startCol, count);
       row.splice(range.startCol + direction, 0, ...moved);
+    }
+    if (sheet.colWidths) {
+      while (sheet.colWidths.length < sheet.colCount) sheet.colWidths.push(80);
+      const widths = sheet.colWidths.splice(range.startCol, count);
+      sheet.colWidths.splice(range.startCol + direction, 0, ...widths);
     }
     const nextStart = range.startCol + direction;
     const nextEnd = range.endCol + direction;
@@ -2029,18 +4115,53 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     return `${this.activeSheetIndex()}:${row}:${col}`;
   }
 
-  protected getCellFormat(row: number, col: number): { bold?: boolean; italic?: boolean; underline?: boolean; align?: 'left' | 'center' | 'right'; fontSize?: number } {
-    return this.xlsxCellFormats.get(this.getCellFormatKey(row, col)) ?? {};
+  protected getCellFormat(row: number, col: number): SpreadsheetFormat {
+    const css = this.activeSheet?.cellStyles?.[row + ':' + col] ?? {};
+    return {
+      bold: css['font-weight'] === 'bold',
+      italic: css['font-style'] === 'italic',
+      underline: css['text-decoration'] === 'underline',
+      align:
+        (css['text-align'] as SpreadsheetFormat['align']) ??
+        (typeof this.getCellValue(row, col) === 'number' ? 'right' : 'left'),
+      fontSize: parseFloat(css['font-size']) * (css['font-size']?.endsWith('pt') ? 4 / 3 : 1) || 12,
+      color: css['color'],
+      background: css['background-color'],
+      wrap: css['white-space'] === 'pre-wrap',
+      numberFormat: this.activeSheet?.numberFormats?.[`${row}:${col}`],
+      ...this.xlsxCellFormats.get(this.getCellFormatKey(row, col)),
+    };
   }
 
+  /**
+   * Combina el formato original del XLSX con cambios locales y resaltados de selección.
+   * @param row Fila con base cero.
+   * @param col Columna con base cero.
+   * @returns Propiedades CSS de la celda, sin modificar sus valores ni el archivo original.
+   */
   protected getCellStyle(row: number, col: number): Record<string, string> {
     const fmt = this.getCellFormat(row, col);
-    const style: Record<string, string> = {};
-    if (fmt.bold) style['font-weight'] = 'bold';
-    if (fmt.italic) style['font-style'] = 'italic';
-    if (fmt.underline) style['text-decoration'] = 'underline';
+    const style: Record<string, string> = { ...this.activeSheet?.cellStyles?.[`${row}:${col}`] };
+    if (fmt.bold !== undefined) style['font-weight'] = fmt.bold ? 'bold' : 'normal';
+    if (fmt.italic !== undefined) style['font-style'] = fmt.italic ? 'italic' : 'normal';
+    if (fmt.underline !== undefined)
+      style['text-decoration'] = fmt.underline ? 'underline' : 'none';
     if (fmt.align) style['text-align'] = fmt.align;
     if (fmt.fontSize) style['font-size'] = fmt.fontSize + 'px';
+    if (fmt.color) style['color'] = fmt.color;
+    if (fmt.background) style['background-color'] = fmt.background;
+    if (fmt.wrap !== undefined) style['white-space'] = fmt.wrap ? 'pre-wrap' : 'nowrap';
+    const pivot = this.activePivot();
+    if (pivot) {
+      const headers =
+        (pivot.filters.length ? pivot.filters.length + 1 : 0) +
+        Math.max(1, pivot.columns.length + (pivot.values.length > 1 ? 1 : 0));
+      if (row < headers || (pivot.totals && row === this.activeSheet!.data.length - 1)) {
+        style['background-color'] = '#dcfce7';
+        style['font-weight'] = 'bold';
+        style['color'] = '#14532d';
+      }
+    }
 
     // Formula range highlight
     for (const h of this.xlsxFormulaHighlights()) {
@@ -2066,9 +4187,10 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     return style;
   }
 
-  private applyFormatToRange(prop: string, value: unknown): void {
+  private applyFormatToRange(prop: keyof SpreadsheetFormat, value: unknown): void {
     const r = this.xlsxRange;
     if (!r) return;
+    this.pushUndoSnapshot();
     for (let row = r.startRow; row <= r.endRow; row++) {
       for (let col = r.startCol; col <= r.endCol; col++) {
         const key = this.getCellFormatKey(row, col);
@@ -2077,8 +4199,8 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
         this.xlsxCellFormats.set(key, existing);
       }
     }
-    // Force change detection on sheets
     this.xlsxSheets.set([...this.xlsxSheets()]);
+    void this.persistXlsxData();
   }
 
   protected toggleXlsxBold(): void {
@@ -2134,327 +4256,35 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     return { row: rowNum, col };
   }
 
-  /** Get numeric values from a range of cells */
-  private getRangeValues(startRef: string, endRef: string): number[] {
-    const s = this.parseCellRef(startRef);
-    const e = this.parseCellRef(endRef);
-    if (!s || !e) return [];
-    const sheet = this.activeSheet;
-    if (!sheet) return [];
-
-    const startRow = Math.min(s.row, e.row);
-    const endRow = Math.max(s.row, e.row);
-    const startCol = Math.min(s.col, e.col);
-    const endCol = Math.max(s.col, e.col);
-    const values: number[] = [];
-
-    for (let r = startRow; r <= endRow; r++) {
-      for (let c = startCol; c <= endCol; c++) {
-        const val = sheet.data[r]?.[c];
-        if (typeof val === 'number') {
-          values.push(val);
-        } else if (typeof val === 'string' && val !== '' && !isNaN(Number(val))) {
-          values.push(Number(val));
-        }
-      }
-    }
-    return values;
-  }
-
-  /** Get numeric value from a single cell reference */
-  private getCellRefValue(ref: string): number | null {
-    const parsed = this.parseCellRef(ref);
-    if (!parsed) return null;
-    const sheet = this.activeSheet;
-    if (!sheet) return null;
-    const val = sheet.data[parsed.row]?.[parsed.col];
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string' && val !== '' && !isNaN(Number(val))) return Number(val);
-    return null;
-  }
-
-  /** Parse formula arguments — can be ranges (A1:B5), cell refs (A1), or numbers */
-  private parseFormulaArgs(argsStr: string): number[] {
-    const values: number[] = [];
-    // Split by comma or semicolon (Excel uses ; in some locales)
-    const parts = argsStr.split(/[,;]/).map(s => s.trim());
-    for (const part of parts) {
-      if (part.includes(':')) {
-        // Range reference
-        const [start, end] = part.split(':').map(s => s.trim());
-        values.push(...this.getRangeValues(start, end));
-      } else if (/^[A-Za-z]+\d+$/.test(part)) {
-        // Single cell reference
-        const v = this.getCellRefValue(part);
-        if (v !== null) values.push(v);
-      } else {
-        // Literal number
-        const n = Number(part);
-        if (!isNaN(n)) values.push(n);
-      }
-    }
-    return values;
-  }
-
-  /** Evaluate a formula string and return the computed result */
-  protected evaluateFormula(formula: string): number | string | null {
-    if (!formula.startsWith('=')) return null;
-    const expr = formula.substring(1).trim();
-
-    // Match function calls: FUNC(args)
-    const funcMatch = expr.match(/^([A-Za-zÁÉÍÓÚÑ.]+)\((.*)\)$/i);
-    if (!funcMatch) {
-      return evaluateArithmeticExpression(expr, reference => this.getCellRefValue(reference));
-    }
-
-    const funcName = funcMatch[1].toUpperCase();
-    const argsStr = funcMatch[2];
-    const values = this.parseFormulaArgs(argsStr);
-
-    switch (funcName) {
-      case 'SUM':
-      case 'SUMA':
-        return values.reduce((a, b) => a + b, 0);
-
-      case 'AVERAGE':
-      case 'PROMEDIO':
-        return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-
-      case 'COUNT':
-      case 'CONTAR':
-        return values.length;
-
-      case 'MIN':
-        return values.length > 0 ? Math.min(...values) : 0;
-
-      case 'MAX':
-        return values.length > 0 ? Math.max(...values) : 0;
-
-      case 'ABS':
-        return values.length > 0 ? Math.abs(values[0]) : 0;
-
-      case 'ROUND':
-      case 'REDONDEAR': {
-        // ROUND(value, decimals)
-        const parts = argsStr.split(/[,;]/).map(s => s.trim());
-        if (parts.length >= 2) {
-          const vals0 = this.parseFormulaArgs(parts[0]);
-          const vals1 = this.parseFormulaArgs(parts[1]);
-          const v = vals0[0] ?? 0;
-          const d = vals1[0] ?? 0;
-          const factor = Math.pow(10, d);
-          return Math.round(v * factor) / factor;
-        }
-        return values.length > 0 ? Math.round(values[0]) : 0;
-      }
-
-      case 'IF':
-      case 'SI': {
-        // =IF(condition, valueTrue, valueFalse) — basic: compares with >, <, =, >=, <=, <>
-        const parts = this.splitFormulaTopLevel(argsStr);
-        if (parts.length >= 3) {
-          const condResult = this.evaluateCondition(parts[0].trim());
-          const trueVal = this.evaluateSimpleValue(parts[1].trim());
-          const falseVal = this.evaluateSimpleValue(parts[2].trim());
-          return condResult ? trueVal : falseVal;
-        }
-        return '#ERROR!';
-      }
-
-      case 'COUNTIF':
-      case 'CONTAR.SI': {
-        // =COUNTIF(range, criteria)
-        const parts = this.splitFormulaTopLevel(argsStr);
-        if (parts.length >= 2) {
-          const rangePart = parts[0].trim();
-          const criteria = parts[1].trim().replace(/^"(.*)"$/, '$1');
-          if (rangePart.includes(':')) {
-            const [start, end] = rangePart.split(':').map(s => s.trim());
-            return this.countIf(start, end, criteria);
-          }
-        }
-        return 0;
-      }
-
-      case 'SUMIF':
-      case 'SUMAR.SI': {
-        // =SUMIF(range, criteria, [sum_range])
-        const parts = this.splitFormulaTopLevel(argsStr);
-        if (parts.length >= 2) {
-          const rangePart = parts[0].trim();
-          const criteria = parts[1].trim().replace(/^"(.*)"$/, '$1');
-          const sumRangePart = parts[2]?.trim();
-          if (rangePart.includes(':')) {
-            const [start, end] = rangePart.split(':').map(s => s.trim());
-            let sumStart = start, sumEnd = end;
-            if (sumRangePart && sumRangePart.includes(':')) {
-              [sumStart, sumEnd] = sumRangePart.split(':').map(s => s.trim());
-            }
-            return this.sumIf(start, end, criteria, sumStart, sumEnd);
-          }
-        }
-        return 0;
-      }
-
-      default:
-        return '#NAME?';
-    }
-  }
-
-  /** Split formula args at top level (respecting nested parentheses) */
-  private splitFormulaTopLevel(argsStr: string): string[] {
-    const parts: string[] = [];
-    let depth = 0;
-    let current = '';
-    for (const ch of argsStr) {
-      if (ch === '(') { depth++; current += ch; }
-      else if (ch === ')') { depth--; current += ch; }
-      else if ((ch === ',' || ch === ';') && depth === 0) {
-        parts.push(current);
-        current = '';
-      } else {
-        current += ch;
-      }
-    }
-    if (current) parts.push(current);
-    return parts;
-  }
-
-  /** Evaluate a simple condition like "A1>10", "B2>=5", "C3<>0" */
-  private evaluateCondition(cond: string): boolean {
-    const ops = ['>=', '<=', '<>', '!=', '>', '<', '='];
-    for (const op of ops) {
-      const idx = cond.indexOf(op);
-      if (idx >= 0) {
-        const left = this.evaluateSimpleValue(cond.substring(0, idx).trim());
-        const right = this.evaluateSimpleValue(cond.substring(idx + op.length).trim());
-        const l = typeof left === 'number' ? left : Number(left);
-        const r = typeof right === 'number' ? right : Number(right);
-        if (isNaN(l) || isNaN(r)) return false;
-        switch (op) {
-          case '>=': return l >= r;
-          case '<=': return l <= r;
-          case '<>': case '!=': return l !== r;
-          case '>': return l > r;
-          case '<': return l < r;
-          case '=': return l === r;
-        }
-      }
-    }
-    return false;
-  }
-
-  /** Evaluate a simple value: cell ref, number, or quoted string */
-  private evaluateSimpleValue(val: string): number | string {
-    // Quoted string
-    if (val.startsWith('"') && val.endsWith('"')) {
-      return val.slice(1, -1);
-    }
-    // Cell reference
-    if (/^[A-Za-z]+\d+$/.test(val)) {
-      return this.getCellRefValue(val) ?? 0;
-    }
-    // Nested formula
-    if (val.startsWith('=')) {
-      return this.evaluateFormula(val) ?? 0;
-    }
-    // Function call without =
-    if (/^[A-Za-z]+\(/.test(val)) {
-      return this.evaluateFormula('=' + val) ?? 0;
-    }
-    // Number
-    const n = Number(val);
-    return isNaN(n) ? val : n;
-  }
-
-  /** COUNTIF implementation */
-  private countIf(startRef: string, endRef: string, criteria: string): number {
-    const s = this.parseCellRef(startRef);
-    const e = this.parseCellRef(endRef);
-    if (!s || !e) return 0;
-    const sheet = this.activeSheet;
-    if (!sheet) return 0;
-
-    const { op, numVal: critNum, textVal: critText } = this.parseCriteria(criteria);
-    let count = 0;
-    for (let r = Math.min(s.row, e.row); r <= Math.max(s.row, e.row); r++) {
-      for (let c = Math.min(s.col, e.col); c <= Math.max(s.col, e.col); c++) {
-        const cellVal = sheet.data[r]?.[c];
-        if (this.matchesCriteria(cellVal, op, critNum, critText)) count++;
-      }
-    }
-    return count;
-  }
-
-  /** SUMIF implementation */
-  private sumIf(condStartRef: string, condEndRef: string, criteria: string, sumStartRef: string, sumEndRef: string): number {
-    const cs = this.parseCellRef(condStartRef);
-    const ce = this.parseCellRef(condEndRef);
-    const ss = this.parseCellRef(sumStartRef);
-    const se = this.parseCellRef(sumEndRef);
-    if (!cs || !ce || !ss || !se) return 0;
-    const sheet = this.activeSheet;
-    if (!sheet) return 0;
-
-    const { op, numVal: critNum, textVal: critText } = this.parseCriteria(criteria);
-    let sum = 0;
-    const condRows = Math.max(cs.row, ce.row) - Math.min(cs.row, ce.row) + 1;
-    const condCols = Math.max(cs.col, ce.col) - Math.min(cs.col, ce.col) + 1;
-
-    for (let dr = 0; dr < condRows; dr++) {
-      for (let dc = 0; dc < condCols; dc++) {
-        const condRow = Math.min(cs.row, ce.row) + dr;
-        const condCol = Math.min(cs.col, ce.col) + dc;
-        const sumRow = Math.min(ss.row, se.row) + dr;
-        const sumCol = Math.min(ss.col, se.col) + dc;
-
-        const condVal = sheet.data[condRow]?.[condCol];
-        if (this.matchesCriteria(condVal, op, critNum, critText)) {
-          const sumVal = sheet.data[sumRow]?.[sumCol];
-          if (typeof sumVal === 'number') sum += sumVal;
-          else if (typeof sumVal === 'string' && !isNaN(Number(sumVal))) sum += Number(sumVal);
-        }
-      }
-    }
-    return sum;
-  }
-
-  private parseCriteria(criteria: string): { op: string; numVal: number | null; textVal: string } {
-    let op = '=';
-    let valStr = criteria;
-    if (criteria.startsWith('>=')) { op = '>='; valStr = criteria.substring(2); }
-    else if (criteria.startsWith('<=')) { op = '<='; valStr = criteria.substring(2); }
-    else if (criteria.startsWith('<>') || criteria.startsWith('!=')) { op = '<>'; valStr = criteria.substring(2); }
-    else if (criteria.startsWith('>')) { op = '>'; valStr = criteria.substring(1); }
-    else if (criteria.startsWith('<')) { op = '<'; valStr = criteria.substring(1); }
-    else if (criteria.startsWith('=')) { op = '='; valStr = criteria.substring(1); }
-
-    const n = Number(valStr);
-    return { op, numVal: isNaN(n) ? null : n, textVal: valStr };
-  }
-
-  private matchesCriteria(cellVal: string | number | boolean | null | undefined, op: string, critNum: number | null, critText: string): boolean {
-    if (cellVal == null) return false;
-    const num = typeof cellVal === 'number' ? cellVal : (typeof cellVal === 'string' && !isNaN(Number(cellVal)) ? Number(cellVal) : null);
-
-    if (critNum !== null && num !== null) {
-      switch (op) {
-        case '=': return num === critNum;
-        case '>': return num > critNum;
-        case '<': return num < critNum;
-        case '>=': return num >= critNum;
-        case '<=': return num <= critNum;
-        case '<>': return num !== critNum;
-      }
-    }
-    // Text comparison
-    const cellStr = String(cellVal).toLowerCase();
-    const critLower = critText.toLowerCase();
-    switch (op) {
-      case '=': return cellStr === critLower;
-      case '<>': return cellStr !== critLower;
-      default: return false;
-    }
+  /** Recibe expresión de la celda activa; retorna su valor con nombres definidos y época de fechas de esa hoja. */
+  protected evaluateFormula(formula: string): XlsxCellValue {
+    return evaluateSpreadsheetFormula(
+      formula,
+      (reference) => {
+        const address = spreadsheetAddress(reference);
+        if (!address) return '#REF!';
+        const sheet =
+          address.sheet === undefined
+            ? this.activeSheet
+            : this.xlsxSheets().find((s) => s.name.toLowerCase() === address.sheet!.toLowerCase());
+        return sheet ? (sheet.data[address.row]?.[address.col] ?? null) : '#REF!';
+      },
+      {
+        usedRows: Math.max(1, ...this.xlsxSheets().map((s) => s.data.length)),
+        resolveStructured: (reference) =>
+          resolveSpreadsheetTable(
+            reference,
+            this.xlsxSheets().flatMap((s) => s.tables ?? []),
+            this.activeSheet?.name ?? '',
+            this.selectedCell()?.row ?? 0,
+            this.selectedCell()?.col ?? 0,
+          ),
+        date1904: this.activeSheet?.date1904,
+        row: this.selectedCell()?.row,
+        col: this.selectedCell()?.col,
+        resolveName: (name) => this.activeSheet?.definedNames?.[name.toUpperCase()],
+      },
+    );
   }
 
   /** Check if a cell has a formula */
@@ -2476,8 +4306,13 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     for (let row = r.startRow; row <= r.endRow; row++) {
       for (let col = r.startCol; col <= r.endCol; col++) {
         const val = sheet.data[row]?.[col];
-        if (typeof val === 'number') { sum += val; hasNum = true; }
-        else if (typeof val === 'string' && val !== '' && !isNaN(Number(val))) { sum += Number(val); hasNum = true; }
+        if (typeof val === 'number') {
+          sum += val;
+          hasNum = true;
+        } else if (typeof val === 'string' && val !== '' && !isNaN(Number(val))) {
+          sum += Number(val);
+          hasNum = true;
+        }
       }
     }
     return hasNum ? sum : null;
@@ -2512,8 +4347,13 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     for (let row = r.startRow; row <= r.endRow; row++) {
       for (let col = r.startCol; col <= r.endCol; col++) {
         const val = sheet.data[row]?.[col];
-        if (typeof val === 'number') { sum += val; count++; }
-        else if (typeof val === 'string' && val !== '' && !isNaN(Number(val))) { sum += Number(val); count++; }
+        if (typeof val === 'number') {
+          sum += val;
+          count++;
+        } else if (typeof val === 'string' && val !== '' && !isNaN(Number(val))) {
+          sum += Number(val);
+          count++;
+        }
       }
     }
     return count > 0 ? sum / count : null;
@@ -2534,16 +4374,25 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   }
 
   /** Insert or update the range reference in the formula text */
-  private insertOrUpdateFormulaRange(startRow: number, startCol: number, endRow: number, endCol: number): void {
+  private insertOrUpdateFormulaRange(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+  ): void {
     const formula = this.formulaBarValue();
-    const ref = startRow === endRow && startCol === endCol
-      ? this.getCellRef(startRow, startCol)
-      : `${this.getCellRef(startRow, startCol)}:${this.getCellRef(endRow, endCol)}`;
+    const ref =
+      startRow === endRow && startCol === endCol
+        ? this.getCellRef(startRow, startCol)
+        : `${this.getCellRef(startRow, startCol)}:${this.getCellRef(endRow, endCol)}`;
 
     let newFormula: string;
     if (this.xlsxFormulaInsertPos >= 0 && this.xlsxFormulaInsertEnd >= 0) {
       // Replace existing range ref we previously inserted
-      newFormula = formula.substring(0, this.xlsxFormulaInsertPos) + ref + formula.substring(this.xlsxFormulaInsertEnd);
+      newFormula =
+        formula.substring(0, this.xlsxFormulaInsertPos) +
+        ref +
+        formula.substring(this.xlsxFormulaInsertEnd);
     } else {
       // First insertion — find the position
       this.xlsxFormulaInsertPos = formula.length;
@@ -2563,7 +4412,13 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       return;
     }
 
-    const highlights: { startRow: number; startCol: number; endRow: number; endCol: number; color: string }[] = [];
+    const highlights: {
+      startRow: number;
+      startCol: number;
+      endRow: number;
+      endCol: number;
+      color: string;
+    }[] = [];
     // Match range references like A1:B5 or single cell refs like A1
     const rangeRegex = /([A-Za-z]+\d+):([A-Za-z]+\d+)/g;
     const singleRegex = /(?<![A-Za-z])([A-Za-z]+)(\d+)(?![\w:])/g;
@@ -2581,7 +4436,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
           startCol: Math.min(start.col, end.col),
           endRow: Math.max(start.row, end.row),
           endCol: Math.max(start.col, end.col),
-          color: this.FORMULA_HIGHLIGHT_COLORS[matchIdx % this.FORMULA_HIGHLIGHT_COLORS.length]
+          color: this.FORMULA_HIGHLIGHT_COLORS[matchIdx % this.FORMULA_HIGHLIGHT_COLORS.length],
         });
         matchIdx++;
       }
@@ -2596,8 +4451,24 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     }
 
     // Match function names to exclude them: look for refs NOT preceded by function context
-    const funcNames = new Set(['SUM', 'SUMA', 'AVERAGE', 'PROMEDIO', 'COUNT', 'CONTAR', 'MIN', 'MAX', 'ABS',
-      'ROUND', 'REDONDEAR', 'IF', 'SI', 'COUNTIF', 'SUMIF', 'SUMAR']);
+    const funcNames = new Set([
+      'SUM',
+      'SUMA',
+      'AVERAGE',
+      'PROMEDIO',
+      'COUNT',
+      'CONTAR',
+      'MIN',
+      'MAX',
+      'ABS',
+      'ROUND',
+      'REDONDEAR',
+      'IF',
+      'SI',
+      'COUNTIF',
+      'SUMIF',
+      'SUMAR',
+    ]);
     const refRegex = /\b([A-Z]+)(\d+)\b/gi;
     while ((m = refRegex.exec(formula)) !== null) {
       if (rangePositions.has(m.index)) continue;
@@ -2610,7 +4481,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
           startCol: parsed.col,
           endRow: parsed.row,
           endCol: parsed.col,
-          color: this.FORMULA_HIGHLIGHT_COLORS[matchIdx % this.FORMULA_HIGHLIGHT_COLORS.length]
+          color: this.FORMULA_HIGHLIGHT_COLORS[matchIdx % this.FORMULA_HIGHLIGHT_COLORS.length],
         });
         matchIdx++;
       }
@@ -2678,7 +4549,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       } else {
         this.downloadService.dismiss(fileName);
       }
-    } catch { this.downloadService.showError(fileName); }
+    } catch {
+      this.downloadService.showError(fileName);
+    }
   }
 
   protected readonly wordCount = computed(() => {
@@ -2720,6 +4593,16 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       this.content.set(el.innerHTML);
       this.scheduleSave();
     }
+  }
+
+  /**
+   * Guarda los cambios del editor TXT respetando espacios y saltos de línea.
+   * @param value Texto plano escrito en el documento.
+   * @returns Nada; actualiza la señal local y programa el autosave existente.
+   */
+  onPlainTextChange(value: string): void {
+    this.content.set(value);
+    this.scheduleSave();
   }
 
   /** Execute a document.execCommand and refocus editor */
@@ -2879,6 +4762,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     }
   }
 
+  /** Programa el título y contenido de la nota activa; no recibe argumentos ni retorna valor. */
   private scheduleSave(): void {
     const noteId = this.noteService.selectedNoteId();
     if (noteId === null) return;
@@ -2892,11 +4776,13 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       noteId,
       title: this.title(),
       content: this.content(),
+      wordDocument: this.noteService.selectedNote()?.file_type === 'docx',
     };
     const timer = setTimeout(() => void this.flushPendingSave(), 500);
     this.pendingSave = { timer, ...snapshot };
   }
 
+  /** Persiste el snapshot pendiente; en Word cambia solo el título para conservar el índice del DOCX. */
   private async flushPendingSave(): Promise<void> {
     const pending = this.pendingSave;
     if (!pending) return;
@@ -2905,7 +4791,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     if (this.noteService.selectedNoteId() === pending.noteId) this.skipNextSync = true;
     await this.noteService.updateNote(pending.noteId, {
       title: pending.title,
-      content: pending.content,
+      ...(pending.wordDocument ? {} : { content: pending.content }),
     });
   }
 
@@ -2956,7 +4842,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       } else {
         this.downloadService.dismiss(fileName);
       }
-    } catch { this.downloadService.showError(fileName); }
+    } catch {
+      this.downloadService.showError(fileName);
+    }
   }
 
   // ── Download as .html ──
@@ -2986,7 +4874,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     try {
       const result = await window.electronAPI.fileSaveAs({
         defaultName: fileName,
-        filters: [{ name: this.translate.instant('NOTE_EDITOR.FILTER_HTML'), extensions: ['html', 'htm'] }],
+        filters: [
+          { name: this.translate.instant('NOTE_EDITOR.FILTER_HTML'), extensions: ['html', 'htm'] },
+        ],
         content: fullHtml,
         encoding: 'utf-8',
       });
@@ -2995,7 +4885,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       } else {
         this.downloadService.dismiss(fileName);
       }
-    } catch { this.downloadService.showError(fileName); }
+    } catch {
+      this.downloadService.showError(fileName);
+    }
   }
 
   // ── Download as .docx ──
@@ -3010,7 +4902,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       const buffer = Array.from(docxBlob);
       const result = await window.electronAPI.fileSaveAsBuffer({
         defaultName: fileName,
-        filters: [{ name: this.translate.instant('NOTE_EDITOR.FILTER_WORD'), extensions: ['docx'] }],
+        filters: [
+          { name: this.translate.instant('NOTE_EDITOR.FILTER_WORD'), extensions: ['docx'] },
+        ],
         buffer,
       });
       if (result.success && result.filePath) {
@@ -3018,7 +4912,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       } else {
         this.downloadService.dismiss(fileName);
       }
-    } catch { this.downloadService.showError(fileName); }
+    } catch {
+      this.downloadService.showError(fileName);
+    }
   }
 
   protected async printCurrentDocument(): Promise<void> {
@@ -3028,7 +4924,19 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
 
     try {
       let result: { success: boolean; canceled?: boolean; error?: string };
-      if (note.file_type === 'pdf') {
+      if (note.file_type === 'docx') {
+        const htmlContent = await this.importedDocument()?.getPrintableContent();
+        if (!htmlContent) throw new Error('El documento Word todavía no está listo para imprimir.');
+        result = await window.electronAPI.filePrint({
+          title: this.title() || note.title,
+          htmlContent,
+        });
+      } else if (note.file_type === 'txt') {
+        result = await window.electronAPI.filePrint({
+          title: this.title() || note.title,
+          htmlContent: `<pre style="white-space:pre-wrap;font-family:monospace">${this.escapeXml(this.content())}</pre>`,
+        });
+      } else if (note.file_type === 'pdf') {
         const fullNote = await window.electronAPI.notesGetById(note.id);
         if (!fullNote?.file_data) throw new Error('El PDF no contiene datos para imprimir.');
         result = await window.electronAPI.filePrint({
@@ -3070,32 +4978,44 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
   private buildPrintableSpreadsheet(): string {
     const sheet = this.activeSheet;
     const documentTitle = this.escapeXml(this.title() || 'Hoja de cálculo');
-    if (!sheet) return `<h1>${documentTitle}</h1><p>${this.escapeXml(this.translate.instant('NOTE_EDITOR.NO_PRINTABLE_CONTENT'))}</p>`;
+    if (!sheet)
+      return `<h1>${documentTitle}</h1><p>${this.escapeXml(this.translate.instant('NOTE_EDITOR.NO_PRINTABLE_CONTENT'))}</p>`;
 
     let lastRow = -1;
     let lastColumn = -1;
-    sheet.data.forEach((row, rowIndex) => row.forEach((value, columnIndex) => {
-      if (value !== null && value !== '') {
-        lastRow = Math.max(lastRow, rowIndex);
-        lastColumn = Math.max(lastColumn, columnIndex);
-      }
-    }));
+    sheet.data.forEach((row, rowIndex) =>
+      row.forEach((value, columnIndex) => {
+        if (value !== null && value !== '') {
+          lastRow = Math.max(lastRow, rowIndex);
+          lastColumn = Math.max(lastColumn, columnIndex);
+        }
+      }),
+    );
     const rowCount = Math.max(1, lastRow + 1);
     const columnCount = Math.max(1, lastColumn + 1);
-    const headers = Array.from({ length: columnCount }, (_, index) =>
-      `<th>${this.getColumnLabel(index)}</th>`,
+    const headers = Array.from(
+      { length: columnCount },
+      (_, index) => `<th>${this.getColumnLabel(index)}</th>`,
     ).join('');
     const rows = Array.from({ length: rowCount }, (_, rowIndex) => {
       const cells = Array.from({ length: columnCount }, (_, columnIndex) => {
         const value = sheet.data[rowIndex]?.[columnIndex] ?? '';
-        const format = this.xlsxCellFormats.get(`${this.activeSheetIndex()}:${rowIndex}:${columnIndex}`);
+        const format = this.xlsxCellFormats.get(
+          `${this.activeSheetIndex()}:${rowIndex}:${columnIndex}`,
+        );
         const styles = [
           format?.bold ? 'font-weight:700' : '',
           format?.italic ? 'font-style:italic' : '',
           format?.underline ? 'text-decoration:underline' : '',
-          format?.align ? `text-align:${format.align}` : typeof value === 'number' ? 'text-align:right' : '',
+          format?.align
+            ? `text-align:${format.align}`
+            : typeof value === 'number'
+              ? 'text-align:right'
+              : '',
           format?.fontSize ? `font-size:${Math.max(8, Math.min(28, format.fontSize))}pt` : '',
-        ].filter(Boolean).join(';');
+        ]
+          .filter(Boolean)
+          .join(';');
         return `<td${styles ? ` style="${styles}"` : ''}>${this.escapeXml(String(value))}</td>`;
       }).join('');
       return `<tr><th>${rowIndex + 1}</th>${cells}</tr>`;
@@ -3109,24 +5029,30 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     if (slides.length === 0) {
       return `<p>${this.escapeXml(this.translate.instant('NOTE_EDITOR.NO_PRINTABLE_CONTENT'))}</p>`;
     }
-    return slides.map(slide => {
-      const titleStyle = [
-        `font-size:${slide.style.titleFontSize}pt`,
-        `text-align:${slide.style.titleAlign}`,
-        slide.style.titleBold ? 'font-weight:700' : '',
-        slide.style.titleItalic ? 'font-style:italic' : '',
-        slide.style.titleUnderline ? 'text-decoration:underline' : '',
-      ].filter(Boolean).join(';');
-      const bodyStyle = [
-        `font-size:${slide.style.bodyFontSize}pt`,
-        `text-align:${slide.style.bodyAlign}`,
-        slide.style.bodyBold ? 'font-weight:700' : '',
-        slide.style.bodyItalic ? 'font-style:italic' : '',
-        slide.style.bodyUnderline ? 'text-decoration:underline' : '',
-      ].filter(Boolean).join(';');
-      const body = this.escapeXml(slide.body).replace(/\n/g, '<br>');
-      return `<section class="print-slide" style="background:${slide.style.backgroundColor};color:${slide.style.textColor};border-top:8pt solid ${slide.style.accentColor}"><h1 style="${titleStyle}">${this.escapeXml(slide.title)}</h1>${slide.layout === 'title-only' ? '' : `<div class="print-slide-body" style="${bodyStyle}">${body}</div>`}</section>`;
-    }).join('');
+    return slides
+      .map((slide) => {
+        const titleStyle = [
+          `font-size:${slide.style.titleFontSize}pt`,
+          `text-align:${slide.style.titleAlign}`,
+          slide.style.titleBold ? 'font-weight:700' : '',
+          slide.style.titleItalic ? 'font-style:italic' : '',
+          slide.style.titleUnderline ? 'text-decoration:underline' : '',
+        ]
+          .filter(Boolean)
+          .join(';');
+        const bodyStyle = [
+          `font-size:${slide.style.bodyFontSize}pt`,
+          `text-align:${slide.style.bodyAlign}`,
+          slide.style.bodyBold ? 'font-weight:700' : '',
+          slide.style.bodyItalic ? 'font-style:italic' : '',
+          slide.style.bodyUnderline ? 'text-decoration:underline' : '',
+        ]
+          .filter(Boolean)
+          .join(';');
+        const body = this.escapeXml(slide.body).replace(/\n/g, '<br>');
+        return `<section class="print-slide" style="background:${slide.style.backgroundColor};color:${slide.style.textColor};border-top:8pt solid ${slide.style.accentColor}"><h1 style="${titleStyle}">${this.escapeXml(slide.title)}</h1>${slide.layout === 'title-only' ? '' : `<div class="print-slide-body" style="${bodyStyle}">${body}</div>`}</section>`;
+      })
+      .join('');
   }
 
   // ── Download as .pptx ──
@@ -3142,7 +5068,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       );
       const result = await window.electronAPI.fileSaveAsBuffer({
         defaultName: fileName,
-        filters: [{ name: this.translate.instant('NOTE_EDITOR.FILTER_POWERPOINT'), extensions: ['pptx'] }],
+        filters: [
+          { name: this.translate.instant('NOTE_EDITOR.FILTER_POWERPOINT'), extensions: ['pptx'] },
+        ],
         buffer: Array.from(bytes),
       });
       if (result.success && result.filePath) {
@@ -3150,7 +5078,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       } else {
         this.downloadService.dismiss(fileName);
       }
-    } catch { this.downloadService.showError(fileName); }
+    } catch {
+      this.downloadService.showError(fileName);
+    }
   }
 
   private presentationBlocks(html: string): {
@@ -3166,7 +5096,11 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       level?: number;
     }[] = [];
 
-    const add = (kind: 'heading' | 'paragraph' | 'bullet' | 'number' | 'quote', text: string, level?: number): void => {
+    const add = (
+      kind: 'heading' | 'paragraph' | 'bullet' | 'number' | 'quote',
+      text: string,
+      level?: number,
+    ): void => {
       const normalized = text.replace(/\s+/g, ' ').trim();
       if (normalized) blocks.push({ kind, text: normalized, ...(level ? { level } : {}) });
     };
@@ -3185,10 +5119,12 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
         return;
       }
       if (tag === 'ul' || tag === 'ol') {
-        Array.from(element.children).filter(child => child.tagName.toLowerCase() === 'li').forEach((item, index) => {
-          const text = item.textContent ?? '';
-          add(tag === 'ol' ? 'number' : 'bullet', tag === 'ol' ? `${index + 1}. ${text}` : text);
-        });
+        Array.from(element.children)
+          .filter((child) => child.tagName.toLowerCase() === 'li')
+          .forEach((item, index) => {
+            const text = item.textContent ?? '';
+            add(tag === 'ol' ? 'number' : 'bullet', tag === 'ol' ? `${index + 1}. ${text}` : text);
+          });
         return;
       }
       if (tag === 'blockquote') {
@@ -3196,7 +5132,7 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
         return;
       }
       if (tag === 'p' || tag === 'div') {
-        const hasBlockChildren = Array.from(element.children).some(child =>
+        const hasBlockChildren = Array.from(element.children).some((child) =>
           /^(h[1-3]|p|div|ul|ol|blockquote|table)$/.test(child.tagName.toLowerCase()),
         );
         if (hasBlockChildren) element.childNodes.forEach(walk);
@@ -3204,8 +5140,13 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
         return;
       }
       if (tag === 'table') {
-        element.querySelectorAll('tr').forEach(row => {
-          add('paragraph', Array.from(row.querySelectorAll('th, td')).map(cell => cell.textContent?.trim() ?? '').join('  |  '));
+        element.querySelectorAll('tr').forEach((row) => {
+          add(
+            'paragraph',
+            Array.from(row.querySelectorAll('th, td'))
+              .map((cell) => cell.textContent?.trim() ?? '')
+              .join('  |  '),
+          );
         });
         return;
       }
@@ -3233,7 +5174,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       } else {
         this.downloadService.dismiss(fileName);
       }
-    } catch { this.downloadService.showError(fileName); }
+    } catch {
+      this.downloadService.showError(fileName);
+    }
   }
 
   // ── Download as .xlsx ──
@@ -3254,7 +5197,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       } else {
         this.downloadService.dismiss(fileName);
       }
-    } catch { this.downloadService.showError(fileName); }
+    } catch {
+      this.downloadService.showError(fileName);
+    }
   }
 
   // ── Download as .json ──
@@ -3286,7 +5231,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
     try {
       const result = await window.electronAPI.fileSaveAs({
         defaultName: fileName,
-        filters: [{ name: this.translate.instant('NOTE_EDITOR.FILTER_JSON'), extensions: ['json'] }],
+        filters: [
+          { name: this.translate.instant('NOTE_EDITOR.FILTER_JSON'), extensions: ['json'] },
+        ],
         content: jsonContent,
         encoding: 'utf-8',
       });
@@ -3295,7 +5242,9 @@ export class NoteEditor implements OnDestroy, AfterViewChecked {
       } else {
         this.downloadService.dismiss(fileName);
       }
-    } catch { this.downloadService.showError(fileName); }
+    } catch {
+      this.downloadService.showError(fileName);
+    }
   }
 
   private sanitizeFilename(name: string): string {
@@ -3391,7 +5340,9 @@ ${bodyXml}
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent ?? '';
         if (text.trim()) {
-          paragraphs.push(`    <w:p><w:r><w:t xml:space="preserve">${this.escapeXml(text)}</w:t></w:r></w:p>`);
+          paragraphs.push(
+            `    <w:p><w:r><w:t xml:space="preserve">${this.escapeXml(text)}</w:t></w:r></w:p>`,
+          );
         }
         return;
       }
@@ -3403,7 +5354,9 @@ ${bodyXml}
       if (['h1', 'h2', 'h3'].includes(tag)) {
         const level = tag === 'h1' ? 'Heading1' : tag === 'h2' ? 'Heading2' : 'Heading3';
         const runs = this.elementToRuns(el);
-        paragraphs.push(`    <w:p><w:pPr><w:pStyle w:val="${level}"/>${this.getAlignXml(el)}</w:pPr>${runs}</w:p>`);
+        paragraphs.push(
+          `    <w:p><w:pPr><w:pStyle w:val="${level}"/>${this.getAlignXml(el)}</w:pPr>${runs}</w:p>`,
+        );
       } else if (tag === 'p' || tag === 'div') {
         const runs = this.elementToRuns(el);
         paragraphs.push(`    <w:p><w:pPr>${this.getAlignXml(el)}</w:pPr>${runs}</w:p>`);
@@ -3425,9 +5378,14 @@ ${bodyXml}
     if (paragraphs.length === 0) {
       const text = div.textContent ?? '';
       if (text.trim()) {
-        text.split('\n').filter((l) => l.trim()).forEach((line) => {
-          paragraphs.push(`    <w:p><w:r><w:t xml:space="preserve">${this.escapeXml(line)}</w:t></w:r></w:p>`);
-        });
+        text
+          .split('\n')
+          .filter((l) => l.trim())
+          .forEach((line) => {
+            paragraphs.push(
+              `    <w:p><w:r><w:t xml:space="preserve">${this.escapeXml(line)}</w:t></w:r></w:p>`,
+            );
+          });
       }
     }
 
@@ -3438,7 +5396,15 @@ ${bodyXml}
   private elementToRuns(el: HTMLElement): string {
     const runs: string[] = [];
 
-    const walk = (node: Node, inheritBold: boolean, inheritItalic: boolean, inheritUnderline: boolean, inheritStrike: boolean, inheritColor: string | null, inheritSize: string | null): void => {
+    const walk = (
+      node: Node,
+      inheritBold: boolean,
+      inheritItalic: boolean,
+      inheritUnderline: boolean,
+      inheritStrike: boolean,
+      inheritColor: string | null,
+      inheritSize: string | null,
+    ): void => {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent ?? '';
         if (!text) return;
@@ -3482,7 +5448,15 @@ ${bodyXml}
         if (fontColor) color = fontColor;
         const fontSize = child.getAttribute('size');
         if (fontSize) {
-          const sizeMap: Record<string, string> = { '1': '16', '2': '22', '3': '24', '4': '28', '5': '36', '6': '48', '7': '72' };
+          const sizeMap: Record<string, string> = {
+            '1': '16',
+            '2': '22',
+            '3': '24',
+            '4': '28',
+            '5': '36',
+            '6': '48',
+            '7': '72',
+          };
           size = sizeMap[fontSize] ?? size;
         }
       }
@@ -3508,7 +5482,11 @@ ${bodyXml}
   }
 
   private escapeXml(str: string): string {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   private encodeUTF8(str: string): Uint8Array {
@@ -3532,17 +5510,17 @@ ${bodyXml}
       // Local file header (30 + pathLen + dataLen)
       const localHeader = new Uint8Array(30 + pathBytes.length + data.length);
       const lv = new DataView(localHeader.buffer);
-      lv.setUint32(0, 0x04034b50, true);   // signature
-      lv.setUint16(4, 20, true);            // version needed
-      lv.setUint16(6, 0, true);             // flags
-      lv.setUint16(8, 0, true);             // compression: store
-      lv.setUint16(10, 0, true);            // mod time
-      lv.setUint16(12, 0, true);            // mod date
-      lv.setUint32(14, crc, true);          // crc32
-      lv.setUint32(18, data.length, true);  // compressed size
-      lv.setUint32(22, data.length, true);  // uncompressed size
+      lv.setUint32(0, 0x04034b50, true); // signature
+      lv.setUint16(4, 20, true); // version needed
+      lv.setUint16(6, 0, true); // flags
+      lv.setUint16(8, 0, true); // compression: store
+      lv.setUint16(10, 0, true); // mod time
+      lv.setUint16(12, 0, true); // mod date
+      lv.setUint32(14, crc, true); // crc32
+      lv.setUint32(18, data.length, true); // compressed size
+      lv.setUint32(22, data.length, true); // uncompressed size
       lv.setUint16(26, pathBytes.length, true); // filename length
-      lv.setUint16(28, 0, true);            // extra field length
+      lv.setUint16(28, 0, true); // extra field length
       localHeader.set(pathBytes, 30);
       localHeader.set(data, 30 + pathBytes.length);
       localHeaders.push(localHeader);
@@ -3550,23 +5528,23 @@ ${bodyXml}
       // Central directory entry (46 + pathLen)
       const centralEntry = new Uint8Array(46 + pathBytes.length);
       const cv = new DataView(centralEntry.buffer);
-      cv.setUint32(0, 0x02014b50, true);    // signature
-      cv.setUint16(4, 20, true);            // version made by
-      cv.setUint16(6, 20, true);            // version needed
-      cv.setUint16(8, 0, true);             // flags
-      cv.setUint16(10, 0, true);            // compression
-      cv.setUint16(12, 0, true);            // mod time
-      cv.setUint16(14, 0, true);            // mod date
-      cv.setUint32(16, crc, true);          // crc32
-      cv.setUint32(20, data.length, true);  // compressed size
-      cv.setUint32(24, data.length, true);  // uncompressed size
+      cv.setUint32(0, 0x02014b50, true); // signature
+      cv.setUint16(4, 20, true); // version made by
+      cv.setUint16(6, 20, true); // version needed
+      cv.setUint16(8, 0, true); // flags
+      cv.setUint16(10, 0, true); // compression
+      cv.setUint16(12, 0, true); // mod time
+      cv.setUint16(14, 0, true); // mod date
+      cv.setUint32(16, crc, true); // crc32
+      cv.setUint32(20, data.length, true); // compressed size
+      cv.setUint32(24, data.length, true); // uncompressed size
       cv.setUint16(28, pathBytes.length, true); // filename length
-      cv.setUint16(30, 0, true);            // extra field length
-      cv.setUint16(32, 0, true);            // comment length
-      cv.setUint16(34, 0, true);            // disk number
-      cv.setUint16(36, 0, true);            // internal attrs
-      cv.setUint32(38, 0, true);            // external attrs
-      cv.setUint32(42, offset, true);       // local header offset
+      cv.setUint16(30, 0, true); // extra field length
+      cv.setUint16(32, 0, true); // comment length
+      cv.setUint16(34, 0, true); // disk number
+      cv.setUint16(36, 0, true); // internal attrs
+      cv.setUint32(38, 0, true); // external attrs
+      cv.setUint32(42, offset, true); // local header offset
       centralEntry.set(pathBytes, 46);
       centralEntries.push(centralEntry);
 
@@ -3580,14 +5558,14 @@ ${bodyXml}
     // End of central directory record (22 bytes)
     const eocd = new Uint8Array(22);
     const ev = new DataView(eocd.buffer);
-    ev.setUint32(0, 0x06054b50, true);             // signature
-    ev.setUint16(4, 0, true);                      // disk number
-    ev.setUint16(6, 0, true);                      // disk with CD
-    ev.setUint16(8, files.length, true);            // entries on disk
-    ev.setUint16(10, files.length, true);           // total entries
-    ev.setUint32(12, centralDirSize, true);         // CD size
-    ev.setUint32(16, centralDirOffset, true);       // CD offset
-    ev.setUint16(20, 0, true);                      // comment length
+    ev.setUint32(0, 0x06054b50, true); // signature
+    ev.setUint16(4, 0, true); // disk number
+    ev.setUint16(6, 0, true); // disk with CD
+    ev.setUint16(8, files.length, true); // entries on disk
+    ev.setUint16(10, files.length, true); // total entries
+    ev.setUint32(12, centralDirSize, true); // CD size
+    ev.setUint32(16, centralDirOffset, true); // CD offset
+    ev.setUint16(20, 0, true); // comment length
 
     // Concatenate all parts
     const totalSize = offset + centralDirSize + 22;
